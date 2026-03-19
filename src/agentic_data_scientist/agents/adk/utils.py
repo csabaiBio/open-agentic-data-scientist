@@ -48,6 +48,11 @@ OPENAI_API_BASE = os.getenv("OPENAI_API_BASE")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 ANTHROPIC_API_BASE = os.getenv("ANTHROPIC_API_BASE")
 
+# Local OpenAI-compatible server behavior (vLLM, TGI, etc.)
+# Most local servers reject OpenAI `tool_choice="auto"` unless explicitly enabled.
+# Default to disabling automatic function-calling for local provider.
+LOCAL_ENABLE_AUTO_TOOL_CHOICE = os.getenv("LOCAL_ENABLE_AUTO_TOOL_CHOICE", "false").lower() in ("true", "1", "yes")
+
 # AWS Bedrock configuration
 # Uses the single Bedrock API key (AWS_BEARER_TOKEN_BEDROCK) for authentication.
 # See: https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html
@@ -338,6 +343,15 @@ def get_generate_content_config(
         ),
     }
     provider = (provider_override or LLM_PROVIDER).lower()
+
+    # Local OpenAI-compatible servers (e.g., vLLM) often reject tool_choice="auto"
+    # unless started with explicit flags. Disable automatic function-calling by
+    # default so requests remain compatible out of the box.
+    if provider == "local" and not LOCAL_ENABLE_AUTO_TOOL_CHOICE:
+        config_kwargs["automatic_function_calling"] = types.AutomaticFunctionCallingConfig(
+            disable=True,
+        )
+
     # Bedrock doesn't allow temperature and top_p together
     if provider != "bedrock":
         config_kwargs["top_p"] = 0.95

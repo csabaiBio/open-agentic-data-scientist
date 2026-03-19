@@ -423,8 +423,12 @@ pip install vllm
 vllm serve Qwen/Qwen3-Coder-480B-A35B-Instruct \
   --host 0.0.0.0 --port 8000 \
   --tensor-parallel-size 4 \
+  --enable-auto-tool-choice \
+  --tool-call-parser hermes \
   --max-model-len 32768
 ```
+
+If you don't enable vLLM tool-calling flags, AgenticDS now disables automatic tool choice for `provider=local` by default to avoid 400 errors on `/v1/chat/completions`.
 
 **Option B: Ollama (easiest setup)**
 ```bash
@@ -486,6 +490,10 @@ CODING_MODEL=claude-sonnet-4-5-20250929
 
 # Optional: Provider selection (bedrock, openrouter, openai, anthropic, local)
 LLM_PROVIDER=openai
+
+# Optional: Local provider tool-calling behavior
+# Default false: avoids OpenAI tool_choice="auto" for vLLM compatibility
+LOCAL_ENABLE_AUTO_TOOL_CHOICE=false
 ```
 
 ### Tools & Skills
