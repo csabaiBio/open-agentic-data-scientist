@@ -31,8 +31,12 @@ try:
     from claude_agent_sdk import ClaudeAgentOptions, query
     from claude_agent_sdk.types import McpHttpServerConfig
 except ImportError:
-    # Fallback if claude_agent_sdk is not available
+    # Fallback if claude_agent_sdk is not available (e.g. Linux where wheel is unavailable)
     class ClaudeAgentOptions:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    class McpHttpServerConfig:
         def __init__(self, **kwargs):
             self.__dict__.update(kwargs)
 

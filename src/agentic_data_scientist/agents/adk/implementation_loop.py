@@ -75,6 +75,7 @@ def make_implementation_agents(working_dir: str, tools: list, model_config: dict
         (coding_agent, review_agent, review_confirmation_agent)
     """
     logger.info(f"[AgenticDS] Initializing implementation agents with {len(tools)} tools")
+    provider_for_config = (model_config or {}).get("provider") if model_config else None
 
     # Always use ClaudeCodeAgent for coding
     from agentic_data_scientist.agents.claude_code import ClaudeCodeAgent
@@ -130,7 +131,7 @@ def make_implementation_agents(working_dir: str, tools: list, model_config: dict
                 thinking_budget=-1,
             ),
         ),
-        generate_content_config=get_generate_content_config(temperature=0.0),
+        generate_content_config=get_generate_content_config(temperature=0.0, provider_override=provider_for_config),
         output_key="review_feedback",
         include_contents="none",
         after_agent_callback=review_compression_callback,

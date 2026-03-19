@@ -234,6 +234,7 @@ export default function ProjectDetail() {
                 )}
               </div>
               <h1 className="text-lg font-semibold text-gray-900 leading-snug">{project.query}</h1>
+              <span className="font-mono text-xs text-gray-400 select-all mt-0.5 block" title="Project ID">ID: {project.id}</span>
               {project.input_files.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {project.input_files.map(f => (

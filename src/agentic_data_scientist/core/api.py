@@ -158,6 +158,7 @@ class DataScientist:
             self.agent = app.root_agent  # For compatibility
 
         elif self.config.agent_type == "claude_code":
+            import warnings
             from google.adk.agents import Agent
             from google.adk.apps import App
             from google.adk.apps.app import EventsCompactionConfig
@@ -171,11 +172,13 @@ class DataScientist:
             self.agent = claude_agent
 
             # Create App with compression config (no caching for claude_code)
-            compression_config = EventsCompactionConfig(
-                summarizer=None,
-                compaction_interval=3,  # Compress every 3 invocations
-                overlap_size=2,
-            )
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning, message=".*EventsCompactionConfig.*")
+                compression_config = EventsCompactionConfig(
+                    summarizer=None,
+                    compaction_interval=3,  # Compress every 3 invocations
+                    overlap_size=2,
+                )
 
             self.app = App(
                 name="agentic-data-scientist-claude",

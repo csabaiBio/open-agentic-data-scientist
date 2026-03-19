@@ -294,7 +294,15 @@ export default function Dashboard() {
                   Model Settings
                   {modelProvider && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-100 text-brand-700 font-semibold">
-                      {modelProvider === 'local' ? 'Local' : modelProvider === 'openrouter' ? 'OpenRouter' : 'Bedrock'}
+                      {modelProvider === 'local'
+                        ? 'Local'
+                        : modelProvider === 'openrouter'
+                          ? 'OpenRouter'
+                          : modelProvider === 'openai'
+                            ? 'OpenAI'
+                            : modelProvider === 'anthropic'
+                              ? 'Anthropic'
+                              : 'Bedrock'}
                     </span>
                   )}
                 </span>
@@ -305,10 +313,12 @@ export default function Dashboard() {
                   {/* Provider */}
                   <div className="pt-3">
                     <label className="block text-xs font-medium text-gray-500 mb-2">Provider</label>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 flex-wrap">
                       {[
                         { id: '', label: 'Default (env)', icon: Cpu, desc: 'From .env config' },
                         { id: 'bedrock', label: 'Bedrock', icon: Cpu, desc: 'AWS Bedrock' },
+                        { id: 'openai', label: 'OpenAI', icon: Cpu, desc: 'OpenAI API' },
+                        { id: 'anthropic', label: 'Anthropic', icon: Cpu, desc: 'Anthropic API' },
                         { id: 'openrouter', label: 'OpenRouter', icon: Globe, desc: 'OpenRouter API' },
                         { id: 'local', label: 'Local', icon: Server, desc: 'vLLM / Ollama / HF' },
                       ].map(p => (
@@ -320,6 +330,14 @@ export default function Dashboard() {
                             if (p.id === 'bedrock') {
                               setPlanningModel('bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0')
                               setCodingModel('us.anthropic.claude-sonnet-4-5-20250929-v1:0')
+                              setModelApiBase('')
+                            } else if (p.id === 'openai') {
+                              setPlanningModel('openai/gpt-4.1')
+                              setCodingModel('')
+                              setModelApiBase('')
+                            } else if (p.id === 'anthropic') {
+                              setPlanningModel('anthropic/claude-sonnet-4-5-20250929')
+                              setCodingModel('claude-sonnet-4-5-20250929')
                               setModelApiBase('')
                             } else if (p.id === 'openrouter') {
                               setPlanningModel('openrouter/anthropic/claude-sonnet-4')
@@ -419,7 +437,7 @@ export default function Dashboard() {
                       )}
 
                       {/* API Key (optional) */}
-                      {(modelProvider === 'openrouter' || modelProvider === 'local') && (
+                      {(modelProvider === 'openrouter' || modelProvider === 'openai' || modelProvider === 'anthropic' || modelProvider === 'local') && (
                         <div>
                           <label className="block text-xs font-medium text-gray-500 mb-1">
                             API Key <span className="text-gray-300">(optional)</span>
@@ -428,7 +446,7 @@ export default function Dashboard() {
                             type="password"
                             value={modelApiKey}
                             onChange={e => setModelApiKey(e.target.value)}
-                            placeholder={modelProvider === 'local' ? 'Not needed for most local servers' : 'sk-or-...'}
+                            placeholder={modelProvider === 'local' ? 'Not needed for most local servers' : 'API key'}
                             className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
                           />
                         </div>

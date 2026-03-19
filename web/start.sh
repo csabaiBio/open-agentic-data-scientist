@@ -5,6 +5,7 @@ set -e
 
 # Get the directory where the script is located
 ROOT_DIR=$(pwd)
+HOST_IP=${HOST_IP:-157.181.34.22}
 
 echo -e "\n \033[0;36m Agentic Data Scientist - Web UI\033[0m"
 echo -e "  \033[0;34m================================\033[0m\n"
@@ -32,7 +33,7 @@ echo -e "  \033[0;33mStarting frontend (port 5173)...\033[0m"
 cd "$ROOT_DIR/web/frontend" && npm run dev &
 FRONTEND_PID=$!
 
-echo -e "\n  \033[0;32mOpen http://localhost:5173 in your browser\033[0m\n"
+echo -e "\n  \033[0;32mOpen http://$HOST_IP:5173 in your browser\033[0m\n"
 echo -e "  \033[0;90mPress Ctrl+C to stop both servers\033[0m\n"
 
 # Function to kill processes on exit

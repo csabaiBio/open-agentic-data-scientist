@@ -28,7 +28,7 @@ Agentic Data Scientist is an open-source framework that uses a sophisticated mul
 - **♾️ Unlimited Event History**: Complete preservation of all analysis steps - no more truncated logs
 - **🔄 Server-Sent Events**: Real-time streaming of project progress via API
 - **📈 Interactive Workflow Graph**: Visual narrative of your entire analysis with embedded figure thumbnails
-- **🎛️ Flexible Model Configuration**: Support for Bedrock, OpenRouter, and local inference servers
+- **🎛️ Flexible Model Configuration**: Support for Bedrock, OpenRouter, OpenAI, Anthropic, and local inference servers
 - **📱 REST API**: Complete programmatic access to all features
 
 ## Quick Start
@@ -44,7 +44,7 @@ Before using Agentic Data Scientist, you must have:
    Or visit [Claude Code Quickstart](https://code.claude.com/docs/en/quickstart)
 
 2. **Required API Keys** configured (see Configuration section below)
-   - OPENROUTER_API_KEY (for planning and review agents)
+  - OPENAI_API_KEY or OPENROUTER_API_KEY or AWS_BEARER_TOKEN_BEDROCK (for planning/review agents)
    - ANTHROPIC_API_KEY (for coding agent)
 
 ### Installation
@@ -61,23 +61,32 @@ uvx agentic-data-scientist --mode simple "your query here"
 
 **API Keys**
 
-You must configure two API keys:
+Configure API keys based on your chosen providers:
 
-1. **OpenRouter API Key** (required for planning and review agents):
-   ```bash
-   export OPENROUTER_API_KEY="your_key_here"
-   ```
-   Get your key at: https://openrouter.ai/keys
+1. **Planning/Review provider** (choose one):
+  - **OpenAI**
+    ```bash
+    export OPENAI_API_KEY="your_key_here"
+    ```
+  - **OpenRouter**
+    ```bash
+    export OPENROUTER_API_KEY="your_key_here"
+    ```
+    Get your key at: https://openrouter.ai/keys
+  - **Bedrock**
+    ```bash
+    export AWS_BEARER_TOKEN_BEDROCK="your_token_here"
+    ```
 
-2. **Anthropic API Key** (required for coding agent):
+2. **Coding provider** (Claude Code):
    ```bash
-   export ANTHROPIC_API_KEY="your_key_here"
+  export ANTHROPIC_API_KEY="your_key_here"
    ```
    Get your key at: https://console.anthropic.com/
 
 Alternatively, create a `.env` file in your project directory:
 ```bash
-OPENROUTER_API_KEY=your_key_here
+OPENAI_API_KEY=your_key_here
 ANTHROPIC_API_KEY=your_key_here
 ```
 
@@ -393,6 +402,8 @@ When creating a new project, click **Model Settings** to configure which LLM pro
 |----------|----------------------|--------------|-------|
 | **Default** | From `.env` config | Claude Code CLI | No setup needed if `.env` is configured |
 | **Bedrock** | `bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0` | Claude Code CLI | Requires AWS credentials |
+| **OpenAI** | `openai/gpt-4.1` | Claude Code CLI | Requires `OPENAI_API_KEY` |
+| **Anthropic** | `anthropic/claude-sonnet-4-5-20250929` | Claude Code CLI | Requires `ANTHROPIC_API_KEY` |
 | **OpenRouter** | `openrouter/anthropic/claude-sonnet-4` | Claude Code CLI | Requires `OPENROUTER_API_KEY` |
 | **Local** | Any HuggingFace model via OpenAI-compatible API | Claude Code CLI | Requires local inference server |
 
@@ -462,19 +473,19 @@ docker run --gpus all -p 8000:80 \
 Create a `.env` file:
 
 ```bash
-# Required: API keys (pick one pair based on your provider)
-ANTHROPIC_API_KEY=your_key_here        # For Claude Code coding agent
-OPENROUTER_API_KEY=your_key_here       # For OpenRouter planning/review
-# OR
-AWS_BEARER_TOKEN_BEDROCK=your_token    # For Bedrock planning/review + coding
+# Required: API keys (choose provider(s))
+ANTHROPIC_API_KEY=your_key_here        # Required for Claude Code coding agent
+OPENAI_API_KEY=your_key_here           # Optional: OpenAI for planning/review
+OPENROUTER_API_KEY=your_key_here       # Optional: OpenRouter for planning/review
+AWS_BEARER_TOKEN_BEDROCK=your_token    # Optional: Bedrock for planning/review (+ coding if configured)
 
 # Optional: Override default models
-DEFAULT_MODEL=bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0
-REVIEW_MODEL=bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0
-CODING_MODEL=us.anthropic.claude-sonnet-4-5-20250929-v1:0
+DEFAULT_MODEL=openai/gpt-4.1
+REVIEW_MODEL=openai/gpt-4.1
+CODING_MODEL=claude-sonnet-4-5-20250929
 
-# Optional: Provider selection (bedrock, openrouter)
-LLM_PROVIDER=bedrock
+# Optional: Provider selection (bedrock, openrouter, openai, anthropic, local)
+LLM_PROVIDER=openai
 ```
 
 ### Tools & Skills

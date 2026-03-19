@@ -50,3 +50,6 @@ agentic_output/
 # Node.js
 node_modules/
 package-lock.json
+
+# Projects
+projects/*

@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 
 
 # Model configuration
-DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0")
-REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", "bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "openai/gpt-4.1")
+REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
 CODING_MODEL_NAME = os.getenv("CODING_MODEL", "claude-sonnet-4-5-20250929")
 
 logger.info(f"[AgenticDS] DEFAULT_MODEL={DEFAULT_MODEL_NAME}")
@@ -30,7 +30,7 @@ logger.info(f"[AgenticDS] REVIEW_MODEL={REVIEW_MODEL_NAME}")
 logger.info(f"[AgenticDS] CODING_MODEL={CODING_MODEL_NAME}")
 
 # Configure LLM provider
-# Supported providers: "openrouter" (default), "bedrock"
+# Supported providers: "bedrock", "openrouter", "openai", "anthropic", "local"
 # Auto-detected from available API keys if LLM_PROVIDER is not set.
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "").lower()
 
@@ -39,6 +39,14 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_API_BASE = os.getenv("OPENROUTER_API_BASE", "https://openrouter.ai/api/v1")
 OR_SITE_URL = os.getenv("OR_SITE_URL", "k-dense.ai")
 OR_APP_NAME = os.getenv("OR_APP_NAME", "Agentic Data Scientist")
+
+# OpenAI configuration
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_API_BASE = os.getenv("OPENAI_API_BASE")
+
+# Anthropic configuration
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+ANTHROPIC_API_BASE = os.getenv("ANTHROPIC_API_BASE")
 
 # AWS Bedrock configuration
 # Uses the single Bedrock API key (AWS_BEARER_TOKEN_BEDROCK) for authentication.
@@ -50,10 +58,14 @@ AWS_REGION_NAME = os.getenv("AWS_REGION_NAME", "us-east-1")
 if not LLM_PROVIDER:
     if AWS_BEDROCK_API_KEY:
         LLM_PROVIDER = "bedrock"
+    elif OPENAI_API_KEY:
+        LLM_PROVIDER = "openai"
+    elif ANTHROPIC_API_KEY:
+        LLM_PROVIDER = "anthropic"
     elif OPENROUTER_API_KEY:
         LLM_PROVIDER = "openrouter"
     else:
-        LLM_PROVIDER = "openrouter"  # fallback
+        LLM_PROVIDER = "openai"  # fallback
 
 logger.info(f"[AgenticDS] LLM_PROVIDER={LLM_PROVIDER}")
 
@@ -84,13 +96,39 @@ elif LLM_PROVIDER == "openrouter":
         logger.info("[AgenticDS] OpenRouter API key configured")
     else:
         logger.warning("[AgenticDS] OPENROUTER_API_KEY not set - using default credentials")
+elif LLM_PROVIDER == "openai":
+    if OPENAI_API_KEY:
+        os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
+    if OPENAI_API_BASE:
+        os.environ["OPENAI_API_BASE"] = OPENAI_API_BASE
+    logger.info("[AgenticDS] OpenAI provider configured")
+elif LLM_PROVIDER == "anthropic":
+    if ANTHROPIC_API_KEY:
+        os.environ["ANTHROPIC_API_KEY"] = ANTHROPIC_API_KEY
+    if ANTHROPIC_API_BASE:
+        os.environ["ANTHROPIC_API_BASE"] = ANTHROPIC_API_BASE
+    logger.info("[AgenticDS] Anthropic provider configured")
 else:
     logger.warning(f"[AgenticDS] Unknown LLM_PROVIDER '{LLM_PROVIDER}' - no provider-specific setup")
 
 
+def _normalize_model_name(provider: str, model_name: str) -> str:
+    """Normalize model names for provider-specific LiteLLM routing."""
+    if not model_name:
+        return model_name
+
+    if provider == "openai" and "/" not in model_name:
+        return f"openai/{model_name}"
+    if provider == "anthropic" and "/" not in model_name:
+        return f"anthropic/{model_name}"
+    if provider == "local" and not model_name.startswith(("openai/", "ollama/", "huggingface/")):
+        return f"openai/{model_name}"
+    return model_name
+
+
 def create_litellm_model(model_name: str, num_retries: int = 10, timeout: int = 300,
-                         provider_override: str = None, api_base_override: str = None,
-                         api_key_override: str = None) -> LiteLlm:
+                         provider_override: Optional[str] = None, api_base_override: Optional[str] = None,
+                         api_key_override: Optional[str] = None) -> LiteLlm:
     """
     Create a LiteLlm model instance configured for the active LLM provider.
 
@@ -114,14 +152,11 @@ def create_litellm_model(model_name: str, num_retries: int = 10, timeout: int = 
     LiteLlm
         Configured model instance
     """
-    provider = provider_override or LLM_PROVIDER
+    provider = (provider_override or LLM_PROVIDER).lower()
+    model_name = _normalize_model_name(provider, model_name)
 
     if provider == "local":
         # Local provider: vLLM, Ollama, TGI, or any OpenAI-compatible server
-        # Model name should be like "openai/Qwen/Qwen2.5-Coder-32B-Instruct"
-        # or just the HF model name — we prefix "openai/" if not already prefixed
-        if not model_name.startswith(("openai/", "ollama/", "huggingface/")):
-            model_name = f"openai/{model_name}"
         kwargs = {
             "model": model_name,
             "num_retries": num_retries,
@@ -146,9 +181,32 @@ def create_litellm_model(model_name: str, num_retries: int = 10, timeout: int = 
             model=model_name,
             num_retries=num_retries,
             timeout=timeout,
-            api_base=OPENROUTER_API_BASE if OPENROUTER_API_KEY else None,
-            custom_llm_provider="openrouter" if OPENROUTER_API_KEY else None,
+            api_base=api_base_override or OPENROUTER_API_BASE,
+            api_key=api_key_override or OPENROUTER_API_KEY,
+            custom_llm_provider="openrouter",
         )
+    elif provider == "openai":
+        kwargs = {
+            "model": model_name,
+            "num_retries": num_retries,
+            "timeout": timeout,
+        }
+        if api_base_override or OPENAI_API_BASE:
+            kwargs["api_base"] = api_base_override or OPENAI_API_BASE
+        if api_key_override or OPENAI_API_KEY:
+            kwargs["api_key"] = api_key_override or OPENAI_API_KEY
+        return LiteLlm(**kwargs)
+    elif provider == "anthropic":
+        kwargs = {
+            "model": model_name,
+            "num_retries": num_retries,
+            "timeout": timeout,
+        }
+        if api_base_override or ANTHROPIC_API_BASE:
+            kwargs["api_base"] = api_base_override or ANTHROPIC_API_BASE
+        if api_key_override or ANTHROPIC_API_KEY:
+            kwargs["api_key"] = api_key_override or ANTHROPIC_API_KEY
+        return LiteLlm(**kwargs)
     else:
         return LiteLlm(
             model=model_name,
@@ -245,7 +303,11 @@ def exit_loop_simple(tool_context: ToolContext):
     return {}
 
 
-def get_generate_content_config(temperature: float = 0.0, output_tokens: Optional[int] = None):
+def get_generate_content_config(
+    temperature: float = 0.0,
+    output_tokens: Optional[int] = None,
+    provider_override: Optional[str] = None,
+):
     """
     Create a GenerateContentConfig with retry settings.
 
@@ -275,8 +337,9 @@ def get_generate_content_config(temperature: float = 0.0, output_tokens: Optiona
             )
         ),
     }
+    provider = (provider_override or LLM_PROVIDER).lower()
     # Bedrock doesn't allow temperature and top_p together
-    if LLM_PROVIDER != "bedrock":
+    if provider != "bedrock":
         config_kwargs["top_p"] = 0.95
         config_kwargs["seed"] = 42
     return types.GenerateContentConfig(**config_kwargs)

@@ -845,10 +845,22 @@ class ProjectManager:
 
         paper_title = title or f"Analysis Report: {project.query}"
 
-        # Use the configured LLM to generate the paper
-        from agentic_data_scientist.agents.adk.utils import DEFAULT_MODEL_NAME, create_litellm_model
+        # Use project-specific model/provider when available
+        from agentic_data_scientist.agents.adk.utils import (
+            DEFAULT_MODEL_NAME,
+            create_litellm_model,
+            create_litellm_model_from_config,
+        )
 
-        llm = create_litellm_model(DEFAULT_MODEL_NAME, num_retries=3, timeout=120)
+        if project.llm_config:
+            model_config = project.llm_config.model_dump(exclude_none=True)
+            llm = create_litellm_model_from_config(model_config, role="planning", num_retries=3, timeout=120)
+            llm_model_name = model_config.get("planning_model") or DEFAULT_MODEL_NAME
+            provider_for_config = model_config.get("provider")
+        else:
+            llm = create_litellm_model(DEFAULT_MODEL_NAME, num_retries=3, timeout=120)
+            llm_model_name = DEFAULT_MODEL_NAME
+            provider_for_config = None
 
         prompt = f"""Write a SHORT, publication-quality scientific paper based on this analysis.
 The paper MUST be concise enough to fit in 4-5 printed pages (approximately 2500-3000 words including figure captions).
@@ -912,14 +924,12 @@ This is the core section. Present findings with integrated figure references.
         try:
             from google.adk.models.llm_request import LlmRequest
             from google.genai import types as genai_types
-            from agentic_data_scientist.agents.adk.utils import LLM_PROVIDER
-
             config_kwargs = {"temperature": 0.3, "max_output_tokens": 6000}
-            if LLM_PROVIDER != "bedrock":
+            if (provider_for_config or "").lower() != "bedrock":
                 config_kwargs["top_p"] = 0.95
 
             llm_request = LlmRequest(
-                model=DEFAULT_MODEL_NAME,
+                model=llm_model_name,
                 contents=[genai_types.Content(
                     role="user",
                     parts=[genai_types.Part(text=prompt)],
@@ -1093,8 +1103,20 @@ For each: **What** (1 line), **Why** (reference a specific result/limitation fro
 - Orthogonal methods that would confirm key computational predictions
 For each: **What** (1 line), **Why** (reference a specific result from the paper), **Protocol** (key steps, reagents, controls, expected outcome). If relevant PubMed papers are provided, cite them as methodological references."""
 
-        from agentic_data_scientist.agents.adk.utils import DEFAULT_MODEL_NAME, create_litellm_model
-        llm = create_litellm_model(DEFAULT_MODEL_NAME, num_retries=3, timeout=120)
+        from agentic_data_scientist.agents.adk.utils import (
+            DEFAULT_MODEL_NAME,
+            create_litellm_model,
+            create_litellm_model_from_config,
+        )
+        if project.llm_config:
+            model_config = project.llm_config.model_dump(exclude_none=True)
+            llm = create_litellm_model_from_config(model_config, role="planning", num_retries=3, timeout=120)
+            llm_model_name = model_config.get("planning_model") or DEFAULT_MODEL_NAME
+            provider_for_config = model_config.get("provider")
+        else:
+            llm = create_litellm_model(DEFAULT_MODEL_NAME, num_retries=3, timeout=120)
+            llm_model_name = DEFAULT_MODEL_NAME
+            provider_for_config = None
 
         prompt = f"""You are an expert research advisor. Write a SHORT, on-point {type_label} recommendations report.
 
@@ -1130,14 +1152,12 @@ STRICT LENGTH: Maximum 500 words. Be extremely concise -- every sentence must re
         try:
             from google.adk.models.llm_request import LlmRequest
             from google.genai import types as genai_types
-            from agentic_data_scientist.agents.adk.utils import LLM_PROVIDER
-
             config_kwargs = {"temperature": 0.4, "max_output_tokens": 2000}
-            if LLM_PROVIDER != "bedrock":
+            if (provider_for_config or "").lower() != "bedrock":
                 config_kwargs["top_p"] = 0.95
 
             llm_request = LlmRequest(
-                model=DEFAULT_MODEL_NAME,
+                model=llm_model_name,
                 contents=[genai_types.Content(
                     role="user",
                     parts=[genai_types.Part(text=prompt)],

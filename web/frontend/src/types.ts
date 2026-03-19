@@ -53,7 +53,7 @@ export interface GeneratedFile {
   created_at: string
 }
 
-export type ModelProvider = 'bedrock' | 'openrouter' | 'local'
+export type ModelProvider = 'bedrock' | 'openrouter' | 'openai' | 'anthropic' | 'local'
 
 export interface ModelConfig {
   provider: ModelProvider

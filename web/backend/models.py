@@ -70,7 +70,7 @@ class DiscoveryResult(BaseModel):
 
 class ModelConfig(BaseModel):
     """Model configuration for a project run."""
-    provider: str = "bedrock"  # bedrock, openrouter, local
+    provider: str = "openai"  # bedrock, openrouter, openai, anthropic, local
     planning_model: str = ""  # model ID for planning/review/summary agents (LiteLLM)
     coding_model: str = ""  # model ID for coding agent (Claude Code SDK)
     api_base: Optional[str] = None  # base URL for local provider (vLLM, Ollama, TGI)
