@@ -404,7 +404,7 @@ When creating a new project, click **Model Settings** to configure which LLM pro
 | **Bedrock** | `bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0` | Claude Code CLI | Requires AWS credentials |
 | **OpenAI** | `openai/gpt-4.1` | Claude Code CLI | Requires `OPENAI_API_KEY` |
 | **Anthropic** | `anthropic/claude-sonnet-4-5-20250929` | Claude Code CLI | Requires `ANTHROPIC_API_KEY` |
-| **OpenRouter** | `openrouter/anthropic/claude-sonnet-4` | Claude Code CLI | Requires `OPENROUTER_API_KEY` |
+| **OpenRouter** | `anthropic/claude-sonnet-4` | Claude Code CLI | Requires `OPENROUTER_API_KEY` |
 | **Local** | Any HuggingFace model via OpenAI-compatible API | Claude Code CLI | Requires local inference server |
 
 > **Note:** The coding agent always uses Claude Code CLI regardless of provider selection. The provider setting controls the planning, review, and summary agents.
@@ -423,12 +423,12 @@ pip install vllm
 vllm serve Qwen/Qwen3-Coder-480B-A35B-Instruct \
   --host 0.0.0.0 --port 8000 \
   --tensor-parallel-size 4 \
-  --enable-auto-tool-choice \
-  --tool-call-parser hermes \
   --max-model-len 32768
 ```
 
-If you don't enable vLLM tool-calling flags, AgenticDS now disables automatic tool choice for `provider=local` by default to avoid 400 errors on `/v1/chat/completions`.
+AgenticDS disables automatic tool choice for `provider=local` by default to avoid vLLM 400 errors on `/v1/chat/completions`.
+
+Only use vLLM tool-calling flags (`--enable-auto-tool-choice` + `--tool-call-parser ...`) when your model/tokenizer explicitly supports that parser. For example, `--tool-call-parser hermes` requires Hermes-specific tool-call tokens and will fail on many non-Hermes models.
 
 **Option B: Ollama (easiest setup)**
 ```bash

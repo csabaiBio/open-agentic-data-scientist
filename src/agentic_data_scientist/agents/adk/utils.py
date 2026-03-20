@@ -126,6 +126,8 @@ def _normalize_model_name(provider: str, model_name: str) -> str:
         return f"openai/{model_name}"
     if provider == "anthropic" and "/" not in model_name:
         return f"anthropic/{model_name}"
+    if provider == "openrouter" and model_name.startswith("openrouter/"):
+        return model_name[len("openrouter/"):]
     if provider == "local" and not model_name.startswith(("openai/", "ollama/", "huggingface/")):
         return f"openai/{model_name}"
     return model_name
@@ -247,7 +249,14 @@ def create_litellm_model_from_config(model_config: dict, role: str = "planning",
     provider = model_config.get("provider", LLM_PROVIDER)
     model_name = model_config.get("planning_model" if role == "planning" else "coding_model", "")
     if not model_name:
-        model_name = DEFAULT_MODEL_NAME
+        if provider == "openrouter":
+            model_name = "anthropic/claude-sonnet-4"
+        elif provider == "anthropic":
+            model_name = "anthropic/claude-sonnet-4-5-20250929"
+        elif provider == "openai":
+            model_name = "openai/gpt-4.1"
+        else:
+            model_name = DEFAULT_MODEL_NAME
 
     return create_litellm_model(
         model_name, num_retries, timeout,
@@ -351,9 +360,12 @@ def get_generate_content_config(
         config_kwargs["automatic_function_calling"] = types.AutomaticFunctionCallingConfig(
             disable=True,
         )
+        config_kwargs["tool_config"] = types.ToolConfig(
+            function_calling_config=types.FunctionCallingConfig(mode=types.FunctionCallingConfigMode.NONE),
+        )
 
-    # Bedrock doesn't allow temperature and top_p together
-    if provider != "bedrock":
+    # Bedrock and Anthropic models can reject temperature+top_p together
+    if provider not in ("bedrock", "anthropic"):
         config_kwargs["top_p"] = 0.95
         config_kwargs["seed"] = 42
     return types.GenerateContentConfig(**config_kwargs)

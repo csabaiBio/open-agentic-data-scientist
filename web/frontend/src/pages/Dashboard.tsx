@@ -340,7 +340,7 @@ export default function Dashboard() {
                               setCodingModel('claude-sonnet-4-5-20250929')
                               setModelApiBase('')
                             } else if (p.id === 'openrouter') {
-                              setPlanningModel('openrouter/anthropic/claude-sonnet-4')
+                              setPlanningModel('anthropic/claude-sonnet-4')
                               setCodingModel('claude-sonnet-4-5-20250929')
                               setModelApiBase('')
                             } else if (p.id === 'local') {

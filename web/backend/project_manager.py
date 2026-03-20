@@ -33,7 +33,7 @@ from .project_inheritance import inherit_from_base_project
 
 logger = logging.getLogger(__name__)
 
-PROJECTS_DIR = Path(os.getenv("PROJECTS_DIR", "./projects"))
+PROJECTS_DIR = Path(os.getenv("PROJECTS_DIR", "./projects")).resolve()
 
 
 def _now() -> str:
