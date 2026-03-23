@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime
-from typing import AsyncGenerator, Callable, Dict, List, Optional
+from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
 from .pubmed import Paper, search_and_fetch
 
@@ -44,7 +44,7 @@ async def run_discovery(
     Dict with keys: papers, synthesis, hypothesis, datasets, research_question
     """
 
-    def _emit(event_type: str, content: str, metadata: dict = None):
+    def _emit(event_type: str, content: str, metadata: Optional[Dict[str, Any]] = None):
         if emit:
             emit(event_type, content, metadata or {})
 
@@ -77,7 +77,7 @@ async def run_discovery(
     })
 
     # Use LLM to extract multiple broader search queries
-    search_queries = await _extract_search_terms(llm, query)
+    search_queries = await _extract_search_terms(llm, query, emit=_emit)
     _emit("discovery_phase",
           f"Trying {len(search_queries)} search strategies on PubMed...",
           {"phase": "searching", "phase_index": 0})
@@ -149,7 +149,7 @@ Using your own expert knowledge of the biomedical literature:
 
 4. **Why PubMed Returned No Results**: Briefly explain why the specific combination of terms may be too niche or novel for PubMed (e.g., very recent discovery, uncommon combination of gene + phenotype).
 
-**Important**: Clearly state at the top that this synthesis is based on AI knowledge, not on specific retrieved papers. Be scientifically accurate and cite known genes, pathways, and mechanisms by name.""")
+**Important**: Clearly state at the top that this synthesis is based on AI knowledge, not on specific retrieved papers. Be scientifically accurate and cite known genes, pathways, and mechanisms by name.""", emit=_emit)
     else:
         synthesis = await _llm_call(llm, f"""You are a research synthesis expert. Analyze these {len(papers)} recent scientific papers and provide a comprehensive synthesis.
 
@@ -165,7 +165,7 @@ Using your own expert knowledge of the biomedical literature:
 
 4. **Emerging Patterns**: What patterns or trends do you see forming across these papers?
 
-Be specific, cite paper PMIDs when referencing specific findings. Write in clear scientific prose.""")
+Be specific, cite paper PMIDs when referencing specific findings. Write in clear scientific prose.""", emit=_emit)
 
     result["synthesis"] = synthesis
     _emit("discovery_synthesis", synthesis, {"phase": "synthesis_complete", "phase_index": 3})
@@ -211,7 +211,7 @@ Outline 4-6 concrete analytical steps to test the hypothesis, including:
 - Data preprocessing
 - Statistical methods
 - Machine learning approaches if applicable
-- Validation strategy""")
+- Validation strategy""", emit=_emit)
 
     # Parse the response into components
     result["hypothesis"] = hypothesis_response
@@ -240,7 +240,7 @@ Write a single, comprehensive prompt (3-5 paragraphs) that:
 5. Mentions what would constitute a novel, publishable finding
 
 The prompt should be self-contained - an AI data scientist should be able to read it and know exactly what to do.
-Do NOT include any preamble like "Here is the prompt" - just write the research task directly.""")
+Do NOT include any preamble like "Here is the prompt" - just write the research task directly.""", emit=_emit)
 
     result["research_question"] = research_question
     result["analysis_prompt"] = research_question
@@ -256,7 +256,7 @@ Do NOT include any preamble like "Here is the prompt" - just write the research 
     return result
 
 
-async def _extract_search_terms(llm, user_query: str) -> List[str]:
+async def _extract_search_terms(llm, user_query: str, emit: Optional[Callable] = None) -> List[str]:
     """Use the LLM to extract 3-5 PubMed search queries from a natural-language question.
 
     Returns queries ordered from most specific to broadest, each suitable for
@@ -281,7 +281,7 @@ async def _extract_search_terms(llm, user_query: str) -> List[str]:
 ## Output format:
 Return ONLY the 4 search queries, one per line, no numbering, no explanation, no quotes.
 """
-    raw = await _llm_call(llm, prompt)
+    raw = await _llm_call(llm, prompt, emit=emit)
 
     # Parse: one query per line, filter empties
     queries = [line.strip().strip('"').strip("'").strip('-').strip('1234567890.').strip()
@@ -326,12 +326,16 @@ def _format_papers_for_llm(papers: List[Paper], max_abstract_len: int = 800) -> 
     return "\n".join(parts)
 
 
-async def _llm_call(llm, prompt: str, model_name: str = None) -> str:
+async def _llm_call(llm, prompt: str, model_name: Optional[str] = None, emit: Optional[Callable] = None) -> str:
     """Make an LLM call using the LiteLlm API and return the text response."""
     try:
         from google.adk.models.llm_request import LlmRequest
         from google.genai import types as genai_types
-        from agentic_data_scientist.agents.adk.utils import LLM_PROVIDER, DEFAULT_MODEL_NAME
+        from agentic_data_scientist.agents.adk.utils import (
+            DEFAULT_MODEL_NAME,
+            LLM_PROVIDER,
+            calculate_llm_cost,
+        )
 
         config_kwargs = {
             "temperature": 0.3,
@@ -353,6 +357,38 @@ async def _llm_call(llm, prompt: str, model_name: str = None) -> str:
         async for llm_response in llm.generate_content_async(llm_request=llm_request, stream=False):
             response = llm_response
             break
+
+        if response and getattr(response, "usage_metadata", None):
+            usage = response.usage_metadata
+            prompt_tokens = usage.prompt_token_count or 0
+            cached_input_tokens = usage.cached_content_token_count or 0
+            output_tokens = usage.candidates_token_count or 0
+            total_tokens = usage.total_token_count or (prompt_tokens + output_tokens)
+            resolved_model = model_name or DEFAULT_MODEL_NAME
+            cost_usd = calculate_llm_cost(
+                model_name=resolved_model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=output_tokens,
+                provider_override=LLM_PROVIDER,
+                cached_tokens=cached_input_tokens,
+                call_type="generate_content",
+            )
+            if emit:
+                emit(
+                    "usage",
+                    resolved_model,
+                    {
+                        "model": resolved_model,
+                        "provider": LLM_PROVIDER,
+                        "cost_usd": cost_usd,
+                        "usage": {
+                            "prompt_tokens": prompt_tokens,
+                            "cached_input_tokens": cached_input_tokens,
+                            "output_tokens": output_tokens,
+                            "total_tokens": total_tokens,
+                        },
+                    },
+                )
 
         if response and response.content and response.content.parts:
             for part in response.content.parts:

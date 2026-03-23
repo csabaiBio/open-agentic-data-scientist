@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Search, Clock, FileStack, Trash2, Loader2, Upload, X, Sparkles, Compass, Settings2, ChevronDown, ChevronUp, Cpu, Globe, Server } from 'lucide-react'
+import { Plus, Search, Clock, FileStack, Trash2, Loader2, Upload, X, Sparkles, Compass, Settings2, ChevronDown, ChevronUp, Cpu, Globe, Server, Coins } from 'lucide-react'
 import { fetchProjects, createProject, deleteProject } from '../api'
 import type { ProjectSummary, ProjectMode } from '../types'
 import StatusBadge from '../components/StatusBadge'
@@ -21,6 +21,16 @@ function formatDuration(secs: number | null): string {
   if (secs < 60) return `${Math.round(secs)}s`
   if (secs < 3600) return `${Math.floor(secs / 60)}m ${Math.round(secs % 60)}s`
   return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`
+}
+
+function formatUsd(value: number | null | undefined): string {
+  const amount = typeof value === 'number' ? value : 0
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: amount < 0.01 ? 4 : 2,
+    maximumFractionDigits: amount < 0.01 ? 4 : 2,
+  }).format(amount)
 }
 
 export default function Dashboard() {
@@ -336,8 +346,8 @@ export default function Dashboard() {
                               setCodingModel('')
                               setModelApiBase('')
                             } else if (p.id === 'anthropic') {
-                              setPlanningModel('anthropic/claude-sonnet-4-5-20250929')
-                              setCodingModel('claude-sonnet-4-5-20250929')
+                              setPlanningModel('claude-sonnet-4-5')
+                              setCodingModel('claude-sonnet-4-5')
                               setModelApiBase('')
                             } else if (p.id === 'openrouter') {
                               setPlanningModel('anthropic/claude-sonnet-4')
@@ -531,6 +541,10 @@ export default function Dashboard() {
                     <span className="flex items-center gap-1">
                       <FileStack className="w-3 h-3" />
                       {p.files_count} files
+                    </span>
+                    <span className="flex items-center gap-1 text-emerald-600">
+                      <Coins className="w-3 h-3" />
+                      {formatUsd(p.total_cost_usd)}
                     </span>
                   </div>
                 </div>

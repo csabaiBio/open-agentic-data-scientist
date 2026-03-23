@@ -4,9 +4,19 @@ import remarkGfm from 'remark-gfm'
 import {
   Compass, BookOpen, FlaskConical, Lightbulb, Database,
   ChevronDown, ChevronRight, ExternalLink, FileText, Loader2,
-  Play, Pencil, Check, AlertCircle, RotateCcw
+  Play, Pencil, Check, AlertCircle, RotateCcw, Coins
 } from 'lucide-react'
 import type { DiscoveryResult, ProjectEvent } from '../types'
+
+function formatUsd(value: number | null | undefined): string {
+  const amount = typeof value === 'number' ? value : 0
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: amount < 0.01 ? 4 : 2,
+    maximumFractionDigits: amount < 0.01 ? 4 : 2,
+  }).format(amount)
+}
 
 interface Props {
   discovery: DiscoveryResult | null
@@ -239,6 +249,8 @@ export default function DiscoveryPanel({
                   ? 'bg-violet-50/50'
                   : event.type === 'discovery_phase'
                   ? 'bg-blue-50/50'
+                  : event.type === 'usage'
+                  ? 'bg-emerald-50/60'
                   : ''
               }`}
             >
@@ -246,9 +258,22 @@ export default function DiscoveryPanel({
               {event.type === 'discovery_phase' && <Compass className="w-3.5 h-3.5 text-blue-400 mt-0.5 flex-shrink-0" />}
               {event.type === 'discovery_synthesis' && <FlaskConical className="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0" />}
               {event.type === 'discovery_hypothesis' && <Lightbulb className="w-3.5 h-3.5 text-amber-400 mt-0.5 flex-shrink-0" />}
-              <p className="text-gray-600 leading-relaxed">
-                {event.content.length > 300 ? event.content.slice(0, 300) + '...' : event.content}
-              </p>
+              {event.type === 'usage' ? (
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap text-emerald-700">
+                    <Coins className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span className="font-semibold">LLM call cost</span>
+                    <span>{formatUsd(event.metadata?.cost_usd)}</span>
+                  </div>
+                  <p className="text-xs text-emerald-700 mt-1 break-all">
+                    {event.metadata?.model || event.content}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-gray-600 leading-relaxed">
+                  {event.content.length > 300 ? event.content.slice(0, 300) + '...' : event.content}
+                </p>
+              )}
             </div>
           ))}
           {isInProgress && (

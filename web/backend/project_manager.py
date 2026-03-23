@@ -153,6 +153,8 @@ class ProjectManager:
                     stages_completed=sum(1 for s in p.stages if s.status == StageStatus.COMPLETED),
                     files_count=len(p.files),
                     discovery_phase=p.discovery_phase,
+                    total_cost_usd=p.total_cost_usd,
+                    llm_calls=p.llm_calls,
                 )
             )
         return summaries
@@ -310,6 +312,15 @@ class ProjectManager:
             except asyncio.QueueFull:
                 pass
 
+    def _record_usage(self, project: Project, cost_usd: float, usage: Dict[str, int]):
+        """Accumulate LLM usage and cost into the project totals."""
+        project.llm_calls += 1
+        project.total_cost_usd = round(project.total_cost_usd + float(cost_usd or 0.0), 8)
+        project.total_prompt_tokens += int(usage.get("prompt_tokens", 0) or 0)
+        project.total_completion_tokens += int(usage.get("output_tokens", 0) or 0)
+        project.total_cached_tokens += int(usage.get("cached_input_tokens", 0) or 0)
+        project.total_tokens += int(usage.get("total_tokens", 0) or 0)
+
     async def start_project(self, project_id: str, uploaded_files: List[tuple] = None):
         """Start running a project in the background."""
         project = self._projects.get(project_id)
@@ -346,13 +357,23 @@ class ProjectManager:
 
                 def discovery_emit(event_type: str, content: str, metadata: dict = None):
                     """Forward discovery events to the project event stream."""
-                    project.discovery_phase = (metadata or {}).get("phase", project.discovery_phase)
+                    metadata = metadata or {}
+                    project.discovery_phase = metadata.get("phase", project.discovery_phase)
+                    if event_type == "usage":
+                        usage = metadata.get("usage", {})
+                        cost_usd = float(metadata.get("cost_usd", 0.0) or 0.0)
+                        self._record_usage(project, cost_usd, usage)
+                        metadata = {
+                            **metadata,
+                            "llm_call_index": project.llm_calls,
+                            "total_cost_usd": project.total_cost_usd,
+                        }
                     self._emit_event(project_id, ProjectEvent(
                         type=event_type,
                         content=content,
                         author="discovery",
                         timestamp=_now(),
-                        metadata=metadata or {},
+                        metadata=metadata,
                     ))
 
                 discovery_result = await run_discovery(
@@ -583,6 +604,28 @@ class ProjectManager:
 
             elif event_type == "completed":
                 project.duration = event_dict.get("duration", 0)
+
+            elif event_type == "usage":
+                usage = event_dict.get("usage", {}) or {}
+                cost_usd = float(event_dict.get("cost_usd", 0.0) or 0.0)
+                self._record_usage(project, cost_usd, usage)
+
+                metadata = {
+                    "usage": usage,
+                    "model": event_dict.get("model", ""),
+                    "provider": event_dict.get("provider", ""),
+                    "cost_usd": cost_usd,
+                    "llm_call_index": project.llm_calls,
+                    "total_cost_usd": project.total_cost_usd,
+                }
+                self._emit_event(project_id, ProjectEvent(
+                    type="usage",
+                    content=event_dict.get("model") or event_dict.get("author", "LLM call"),
+                    author=event_dict.get("author", ""),
+                    timestamp=event_dict.get("timestamp", _now()),
+                    metadata=metadata,
+                ))
+                self._save_project(project)
 
             elif event_type == "error":
                 project.error = event_dict.get("content", "Unknown error")

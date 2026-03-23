@@ -18,6 +18,13 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
+from agentic_data_scientist.agents.adk.utils import (
+    CODING_MODEL_NAME,
+    DEFAULT_MODEL_NAME,
+    LLM_PROVIDER,
+    calculate_llm_cost,
+    resolve_model_name,
+)
 from agentic_data_scientist.core.events import (
     CompletedEvent,
     ErrorEvent,
@@ -137,6 +144,21 @@ class DataScientist:
         logger.info(f"Initialized Agentic Data Scientist session: {self.session_id}")
         logger.info(f"Working directory: {self.working_dir}")
         logger.info(f"Auto-cleanup enabled: {self.auto_cleanup}")
+
+    def _resolve_usage_model_name(self, author: Optional[str]) -> str:
+        """Resolve the most likely model name for a streamed usage event."""
+        author_key = (author or "").lower()
+        is_coding_author = any(
+            key in author_key for key in ("code_agent", "claude", "coding")
+        )
+
+        if self.model_config:
+            return resolve_model_name(
+                self.model_config,
+                role="coding" if is_coding_author else "planning",
+            )
+
+        return CODING_MODEL_NAME if is_coding_author else DEFAULT_MODEL_NAME
 
     async def _setup_agent(self):
         """Set up the agent and session service."""
@@ -452,13 +474,36 @@ class DataScientist:
                 if hasattr(event, 'usage_metadata') and event.usage_metadata:
                     usage = event.usage_metadata
                     if isinstance(usage, types.GenerateContentResponseUsageMetadata):
+                        custom_metadata = getattr(event, 'custom_metadata', {}) or {}
+                        prompt_tokens = usage.prompt_token_count or 0
+                        cached_input_tokens = usage.cached_content_token_count or 0
+                        output_tokens = usage.candidates_token_count or 0
+                        total_tokens = usage.total_token_count or (prompt_tokens + output_tokens)
+                        provider = custom_metadata.get("provider") or (self.model_config or {}).get("provider", LLM_PROVIDER)
+                        model_name = custom_metadata.get("model") or self._resolve_usage_model_name(getattr(event, 'author', 'agent'))
                         usage_info = {
-                            'total_input_tokens': usage.total_token_count,
-                            'cached_input_tokens': usage.cached_content_token_count,
-                            'output_tokens': usage.candidates_token_count,
+                            'prompt_tokens': prompt_tokens,
+                            'cached_input_tokens': cached_input_tokens,
+                            'output_tokens': output_tokens,
+                            'total_tokens': total_tokens,
                         }
+                        cost_usd = custom_metadata.get("cost_usd")
+                        if cost_usd is None:
+                            cost_usd = calculate_llm_cost(
+                                model_name=model_name,
+                                prompt_tokens=prompt_tokens,
+                                completion_tokens=output_tokens,
+                                provider_override=provider,
+                                cached_tokens=cached_input_tokens,
+                                call_type="generate_content",
+                            )
                         usage_event = UsageEvent(
-                            usage=usage_info, timestamp=datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                            author=getattr(event, 'author', 'agent'),
+                            model=model_name,
+                            provider=provider,
+                            cost_usd=cost_usd,
+                            usage=usage_info,
+                            timestamp=datetime.now().strftime("%H:%M:%S.%f")[:-3],
                         )
                         yield event_to_dict(usage_event)
 

@@ -14,7 +14,7 @@ export interface Stage {
 
 export interface ProjectEvent {
   id: number
-  type: 'message' | 'thought' | 'tool_call' | 'tool_result' | 'status' | 'error' | 'done'
+  type: 'message' | 'thought' | 'tool_call' | 'tool_result' | 'status' | 'error' | 'done' | 'usage'
     | 'discovery_phase' | 'discovery_paper' | 'discovery_synthesis' | 'discovery_hypothesis' | 'discovery_research_question'
   content: string
   author: string
@@ -91,6 +91,12 @@ export interface Project {
   experimental_suggestions: string | null
   // Skills/tools used during the workflow
   skills_used: string[]
+  total_cost_usd: number
+  llm_calls: number
+  total_prompt_tokens: number
+  total_completion_tokens: number
+  total_cached_tokens: number
+  total_tokens: number
 }
 
 export interface ProjectSummary {
@@ -104,4 +110,6 @@ export interface ProjectSummary {
   stages_completed: number
   files_count: number
   discovery_phase: string | null
+  total_cost_usd: number
+  llm_calls: number
 }

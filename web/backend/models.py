@@ -117,6 +117,13 @@ class Project(BaseModel):
     experimental_suggestions: Optional[str] = None
     # Skills/tools used during the workflow
     skills_used: List[str] = Field(default_factory=list)
+    # LLM usage accounting
+    total_cost_usd: float = 0.0
+    llm_calls: int = 0
+    total_prompt_tokens: int = 0
+    total_completion_tokens: int = 0
+    total_cached_tokens: int = 0
+    total_tokens: int = 0
 
 
 class ProjectSummary(BaseModel):
@@ -130,6 +137,8 @@ class ProjectSummary(BaseModel):
     stages_completed: int = 0
     files_count: int = 0
     discovery_phase: Optional[str] = None
+    total_cost_usd: float = 0.0
+    llm_calls: int = 0
 
 
 class PaperRequest(BaseModel):

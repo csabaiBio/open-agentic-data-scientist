@@ -86,6 +86,8 @@ __all__ = [
     'OPENROUTER_API_BASE',
     'AWS_BEDROCK_API_KEY',
     'AWS_REGION_NAME',
+    'resolve_model_name',
+    'calculate_llm_cost',
     'create_litellm_model',
     'get_generate_content_config',
     'exit_loop_simple',
@@ -135,6 +137,67 @@ def _normalize_model_name(provider: str, model_name: str) -> str:
         return model_name
         # return f"openai/{model_name}"
     return model_name
+
+
+def resolve_model_name(model_config: Optional[dict], role: str = "planning") -> str:
+    """Resolve the effective model name for a given role and provider."""
+    if not model_config:
+        default_name = CODING_MODEL_NAME if role == "coding" else DEFAULT_MODEL_NAME
+        return _normalize_model_name(LLM_PROVIDER, default_name)
+
+    provider = (model_config.get("provider") or LLM_PROVIDER).lower()
+    model_name = model_config.get("planning_model" if role == "planning" else "coding_model", "")
+
+    if not model_name:
+        if role == "coding":
+            model_name = CODING_MODEL_NAME
+        elif provider == "openrouter":
+            model_name = "anthropic/claude-sonnet-4"
+        elif provider == "anthropic":
+            model_name = "anthropic/claude-sonnet-4-5"
+        elif provider == "openai":
+            model_name = "openai/gpt-4.1-mini"
+        else:
+            model_name = DEFAULT_MODEL_NAME
+
+    return _normalize_model_name(provider, model_name)
+
+
+def calculate_llm_cost(
+    model_name: str,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    provider_override: Optional[str] = None,
+    cached_tokens: int = 0,
+    call_type: str = "completion",
+) -> float:
+    """Estimate request cost in USD via LiteLLM pricing tables."""
+    if not model_name:
+        return 0.0
+
+    provider = (provider_override or LLM_PROVIDER).lower()
+    normalized_model = _normalize_model_name(provider, model_name)
+
+    try:
+        import litellm
+
+        prompt_cost, completion_cost = litellm.cost_per_token(
+            model=normalized_model,
+            prompt_tokens=max(prompt_tokens, 0),
+            completion_tokens=max(completion_tokens, 0),
+            cache_read_input_tokens=max(cached_tokens, 0),
+            custom_llm_provider=provider,
+            call_type=call_type,
+        )
+        return float(prompt_cost + completion_cost)
+    except Exception as e:
+        logger.debug(
+            "[AgenticDS] Failed to calculate LLM cost for model=%s provider=%s: %s",
+            normalized_model,
+            provider,
+            e,
+        )
+        return 0.0
 
 
 def create_litellm_model(model_name: str, num_retries: int = 10, timeout: int = 300,
@@ -251,16 +314,7 @@ def create_litellm_model_from_config(model_config: dict, role: str = "planning",
         return create_litellm_model(DEFAULT_MODEL_NAME, num_retries, timeout)
 
     provider = model_config.get("provider", LLM_PROVIDER)
-    model_name = model_config.get("planning_model" if role == "planning" else "coding_model", "")
-    if not model_name:
-        if provider == "openrouter":
-            model_name = "anthropic/claude-sonnet-4"
-        elif provider == "anthropic":
-            model_name = "anthropic/claude-sonnet-4-5"
-        elif provider == "openai":
-            model_name = "openai/gpt-4.1-mini"
-        else:
-            model_name = DEFAULT_MODEL_NAME
+    model_name = resolve_model_name(model_config, role=role)
 
     return create_litellm_model(
         model_name, num_retries, timeout,

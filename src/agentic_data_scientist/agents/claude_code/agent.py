@@ -330,6 +330,45 @@ class ClaudeCodeAgent(Agent):
         )
         return truncated
 
+    def _build_usage_metadata(self, usage: Optional[dict[str, Any]]) -> Optional[types.GenerateContentResponseUsageMetadata]:
+        """Convert Claude SDK usage dicts to Google GenAI usage metadata."""
+        if not usage:
+            return None
+
+        prompt_tokens = int(
+            usage.get("input_tokens")
+            or usage.get("prompt_tokens")
+            or usage.get("inputTokens")
+            or 0
+        )
+        output_tokens = int(
+            usage.get("output_tokens")
+            or usage.get("completion_tokens")
+            or usage.get("outputTokens")
+            or 0
+        )
+        cached_tokens = int(
+            usage.get("cache_read_input_tokens")
+            or usage.get("cached_input_tokens")
+            or usage.get("cacheReadInputTokens")
+            or 0
+        )
+        total_tokens = int(
+            usage.get("total_tokens")
+            or usage.get("totalTokens")
+            or (prompt_tokens + output_tokens)
+        )
+
+        if total_tokens == 0 and prompt_tokens == 0 and output_tokens == 0 and cached_tokens == 0:
+            return None
+
+        return types.GenerateContentResponseUsageMetadata(
+            prompt_token_count=prompt_tokens,
+            cached_content_token_count=cached_tokens,
+            candidates_token_count=output_tokens,
+            total_token_count=total_tokens,
+        )
+
     async def _run_async_impl(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
         """Execute Claude Agent with the implementation plan."""
         try:
@@ -606,6 +645,17 @@ Requirements:
                         # Yield a single Event with all converted Parts from this AssistantMessage
                         if google_parts:
                             yield Event(author=self.name, content=types.Content(role="model", parts=google_parts))
+
+                        usage_metadata = self._build_usage_metadata(getattr(message, 'usage', None))
+                        if usage_metadata:
+                            yield Event(
+                                author=self.name,
+                                usage_metadata=usage_metadata,
+                                custom_metadata={
+                                    "model": getattr(message, 'model', str(self.model) if self.model else ""),
+                                    "provider": LLM_PROVIDER,
+                                },
+                            )
 
                     elif message_type == "UserMessage":
                         # User message - contains ToolResultBlock (tool execution results) and possibly TextBlock

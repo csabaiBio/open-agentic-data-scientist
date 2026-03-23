@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm'
 import {
   Brain, MessageSquare, Terminal, AlertTriangle, Info,
   Wrench, ChevronDown, ChevronRight, Compass, Cpu, FlaskConical,
-  Eye, Pencil, Search as SearchIcon, Lightbulb
+  Eye, Pencil, Search as SearchIcon, Lightbulb, Coins
 } from 'lucide-react'
 import type { ProjectEvent } from '../types'
 
@@ -70,6 +70,16 @@ function formatToolCallDetails(event: ProjectEvent): string {
   return entries.join(' • ')
 }
 
+function formatUsd(value: number | null | undefined): string {
+  const amount = typeof value === 'number' ? value : 0
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: amount < 0.01 ? 4 : 2,
+    maximumFractionDigits: amount < 0.01 ? 4 : 2,
+  }).format(amount)
+}
+
 /* ── Markdown renderer with Tailwind prose classes ───────────── */
 
 function MarkdownContent({ content, className = '' }: { content: string; className?: string }) {
@@ -129,6 +139,39 @@ function EventCard({ event }: { event: ProjectEvent }) {
         <div className="flex-1 min-w-0">
           <span className="text-xs font-semibold text-red-600 uppercase tracking-wide">Error</span>
           <p className="text-sm text-red-700 mt-0.5 break-words">{event.content}</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (event.type === 'usage') {
+    const usage = event.metadata?.usage || {}
+    const costUsd = typeof event.metadata?.cost_usd === 'number' ? event.metadata.cost_usd : 0
+    const totalCostUsd = typeof event.metadata?.total_cost_usd === 'number' ? event.metadata.total_cost_usd : null
+    const model = typeof event.metadata?.model === 'string' ? event.metadata.model : event.content
+    const llmCallIndex = typeof event.metadata?.llm_call_index === 'number' ? event.metadata.llm_call_index : null
+
+    return (
+      <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-100 animate-fade-in">
+        <Coins className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-semibold text-emerald-700 uppercase tracking-wide">LLM Cost</span>
+            {llmCallIndex !== null && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                Call {llmCallIndex}
+              </span>
+            )}
+          </div>
+          <div className="mt-1 text-sm text-emerald-900 font-medium break-all">{formatUsd(costUsd)}</div>
+          <div className="mt-1 text-xs text-emerald-800 break-all">{model || event.author || 'LLM call'}</div>
+          <div className="mt-1 text-xs text-emerald-700 flex flex-wrap gap-x-3 gap-y-1">
+            <span>prompt: {usage.prompt_tokens ?? 0}</span>
+            <span>output: {usage.output_tokens ?? 0}</span>
+            {!!usage.cached_input_tokens && <span>cached: {usage.cached_input_tokens}</span>}
+            <span>total: {usage.total_tokens ?? 0}</span>
+            {totalCostUsd !== null && <span>project total: {formatUsd(totalCostUsd)}</span>}
+          </div>
         </div>
       </div>
     )

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, StopCircle, FileText, Image, ScrollText, Loader2,
-  Clock, BookOpen, Download, RefreshCw, BarChart3, Compass, Cpu, FlaskConical, Zap, GitBranch
+  Clock, BookOpen, Download, RefreshCw, BarChart3, Compass, Cpu, FlaskConical, Zap, GitBranch, Coins
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -25,6 +25,16 @@ function formatDuration(secs: number | null): string {
   if (secs < 60) return `${Math.round(secs)}s`
   if (secs < 3600) return `${Math.floor(secs / 60)}m ${Math.round(secs % 60)}s`
   return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`
+}
+
+function formatUsd(value: number | null | undefined): string {
+  const amount = typeof value === 'number' ? value : 0
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: amount < 0.01 ? 4 : 2,
+    maximumFractionDigits: amount < 0.01 ? 4 : 2,
+  }).format(amount)
 }
 
 export default function ProjectDetail() {
@@ -90,6 +100,18 @@ export default function ProjectDetail() {
         // Track discovery phase changes
         if (event.metadata?.phase) {
           setProject(prev => prev ? { ...prev, discovery_phase: event.metadata.phase } : prev)
+        }
+
+        if (event.type === 'usage') {
+          setProject(prev => prev ? {
+            ...prev,
+            total_cost_usd: typeof event.metadata?.total_cost_usd === 'number' ? event.metadata.total_cost_usd : prev.total_cost_usd,
+            llm_calls: typeof event.metadata?.llm_call_index === 'number' ? event.metadata.llm_call_index : prev.llm_calls,
+            total_prompt_tokens: prev.total_prompt_tokens + Number(event.metadata?.usage?.prompt_tokens || 0),
+            total_completion_tokens: prev.total_completion_tokens + Number(event.metadata?.usage?.output_tokens || 0),
+            total_cached_tokens: prev.total_cached_tokens + Number(event.metadata?.usage?.cached_input_tokens || 0),
+            total_tokens: prev.total_tokens + Number(event.metadata?.usage?.total_tokens || 0),
+          } : prev)
         }
 
         // When analysis starts (after confirm), switch to progress tab
@@ -269,7 +291,17 @@ export default function ProjectDetail() {
               )}
             </div>
 
-            <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="flex flex-col items-end gap-3 flex-shrink-0">
+              <div className="min-w-[140px] rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-right">
+                <div className="flex items-center justify-end gap-2 text-emerald-700 mb-1">
+                  <Coins className="w-4 h-4" />
+                  <span className="text-xs font-semibold uppercase tracking-wide">Project Cost</span>
+                </div>
+                <div className="text-xl font-bold text-emerald-900">{formatUsd(project.total_cost_usd)}</div>
+                <div className="text-[11px] text-emerald-700 mt-1">{project.llm_calls} LLM call{project.llm_calls === 1 ? '' : 's'}</div>
+              </div>
+
+              <div className="flex items-center gap-2">
               {isRunning && (
                 <button
                   onClick={handleStop}
@@ -307,6 +339,7 @@ export default function ProjectDetail() {
               >
                 <RefreshCw className="w-4 h-4" />
               </button>
+              </div>
             </div>
           </div>
         </div>

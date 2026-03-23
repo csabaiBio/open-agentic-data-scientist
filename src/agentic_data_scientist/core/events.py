@@ -66,8 +66,17 @@ class UsageEvent(BaseEvent):
     """Token usage metadata event."""
 
     type: Literal["usage"] = "usage"
+    author: str = "agent"
+    model: str = ""
+    provider: str = ""
+    cost_usd: float = 0.0
     usage: Dict[str, int] = field(
-        default_factory=lambda: {"total_input_tokens": 0, "cached_input_tokens": 0, "output_tokens": 0}
+        default_factory=lambda: {
+            "prompt_tokens": 0,
+            "cached_input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+        }
     )
 
 
