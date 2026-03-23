@@ -21,9 +21,9 @@ logger = logging.getLogger(__name__)
 
 
 # Model configuration
-DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "openai/gpt-4.1")
+DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "openai/gpt-4.1-mini")
 REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
-CODING_MODEL_NAME = os.getenv("CODING_MODEL", "claude-sonnet-4-5-20250929")
+CODING_MODEL_NAME = os.getenv("CODING_MODEL", "claude-sonnet-4-5")
 
 logger.info(f"[AgenticDS] DEFAULT_MODEL={DEFAULT_MODEL_NAME}")
 logger.info(f"[AgenticDS] REVIEW_MODEL={REVIEW_MODEL_NAME}")
@@ -80,9 +80,12 @@ __all__ = [
     'REVIEW_MODEL',
     'DEFAULT_MODEL_NAME',
     'REVIEW_MODEL_NAME',
+    'CODING_MODEL_NAME',
     'LLM_PROVIDER',
     'OPENROUTER_API_KEY',
     'OPENROUTER_API_BASE',
+    'AWS_BEDROCK_API_KEY',
+    'AWS_REGION_NAME',
     'create_litellm_model',
     'get_generate_content_config',
     'exit_loop_simple',
@@ -129,7 +132,8 @@ def _normalize_model_name(provider: str, model_name: str) -> str:
     if provider == "openrouter" and model_name.startswith("openrouter/"):
         return model_name[len("openrouter/"):]
     if provider == "local" and not model_name.startswith(("openai/", "ollama/", "huggingface/")):
-        return f"openai/{model_name}"
+        return model_name
+        # return f"openai/{model_name}"
     return model_name
 
 
@@ -252,9 +256,9 @@ def create_litellm_model_from_config(model_config: dict, role: str = "planning",
         if provider == "openrouter":
             model_name = "anthropic/claude-sonnet-4"
         elif provider == "anthropic":
-            model_name = "anthropic/claude-sonnet-4-5-20250929"
+            model_name = "anthropic/claude-sonnet-4-5"
         elif provider == "openai":
-            model_name = "openai/gpt-4.1"
+            model_name = "openai/gpt-4.1-mini"
         else:
             model_name = DEFAULT_MODEL_NAME
 

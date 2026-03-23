@@ -28,6 +28,27 @@ echo -e "  \033[0;33mStarting backend (port 8765)...\033[0m"
 uv run python -m uvicorn web.backend.app:app --host 0.0.0.0 --port 8765 &
 BACKEND_PID=$!
 
+# Wait for backend to be ready before starting the frontend
+echo -e "  \033[0;33mWaiting for backend to be ready...\033[0m"
+BACKEND_URL="http://127.0.0.1:8765/api/projects"
+MAX_WAIT=60
+ELAPSED=0
+until curl -sf "$BACKEND_URL" -o /dev/null 2>/dev/null; do
+    if [ $ELAPSED -ge $MAX_WAIT ]; then
+        echo -e "  \033[0;31mBackend did not start within ${MAX_WAIT}s — aborting.\033[0m"
+        kill $BACKEND_PID 2>/dev/null
+        exit 1
+    fi
+    # Check if the backend process died unexpectedly
+    if ! kill -0 $BACKEND_PID 2>/dev/null; then
+        echo -e "  \033[0;31mBackend process exited unexpectedly — aborting.\033[0m"
+        exit 1
+    fi
+    sleep 1
+    ELAPSED=$((ELAPSED + 1))
+done
+echo -e "  \033[0;32mBackend is up (${ELAPSED}s)\033[0m"
+
 # Start Vite frontend
 echo -e "  \033[0;33mStarting frontend (port 5173)...\033[0m"
 cd "$ROOT_DIR/web/frontend" && npm run dev &

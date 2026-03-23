@@ -19,7 +19,13 @@ from google.adk.agents import Agent, InvocationContext
 from google.adk.events import Event
 from google.genai import types
 
-from agentic_data_scientist.agents.adk.utils import is_network_disabled
+from agentic_data_scientist.agents.adk.utils import (
+    is_network_disabled,
+    LLM_PROVIDER,
+    CODING_MODEL_NAME,
+    AWS_BEDROCK_API_KEY,
+    AWS_REGION_NAME,
+)
 from agentic_data_scientist.agents.claude_code.templates import (
     get_claude_context,
     get_claude_instructions,
@@ -30,8 +36,13 @@ from agentic_data_scientist.agents.claude_code.templates import (
 try:
     from claude_agent_sdk import ClaudeAgentOptions, query
     from claude_agent_sdk.types import McpHttpServerConfig
+    CLAUDE_SDK_AVAILABLE = True
+    CLAUDE_SDK_IMPORT_ERROR = None
 except ImportError:
-    # Fallback if claude_agent_sdk is not available (e.g. Linux where wheel is unavailable)
+    CLAUDE_SDK_AVAILABLE = False
+    CLAUDE_SDK_IMPORT_ERROR = "claude_agent_sdk not installed"
+
+    # Fallback stubs so type construction doesn't fail before the runtime guard.
     class ClaudeAgentOptions:
         def __init__(self, **kwargs):
             self.__dict__.update(kwargs)
@@ -39,9 +50,6 @@ except ImportError:
     class McpHttpServerConfig:
         def __init__(self, **kwargs):
             self.__dict__.update(kwargs)
-
-    async def query(prompt, options):
-        yield {"type": "error", "error": "claude_agent_sdk not installed"}
 
 
 # Load environment variables
@@ -253,15 +261,24 @@ class ClaudeCodeAgent(Agent):
         Claude Agent SDK has a 1MB JSON buffer limit for tool responses. When reading
         large files (>1MB), the agent will fail with a JSON buffer overflow error.
         Instructions are provided to Claude to avoid reading large files directly.
+
+        The model is determined by CODING_MODEL environment variable or detected from LLM_PROVIDER.
+        Bedrock requires a Bedrock-specific model ID; other providers use standard model names.
         """
-        # Get model from environment variable
-        # When using Bedrock, Claude Code needs a Bedrock model ID (not the Anthropic model name)
-        bedrock_api_key = os.getenv("AWS_BEARER_TOKEN_BEDROCK") or os.getenv("AWS_BEDROCK_API_KEY")
-        default_coding_model = (
-            "us.anthropic.claude-sonnet-4-5-20250929-v1:0" if bedrock_api_key
-            else "claude-sonnet-4-5-20250929"
-        )
-        model = os.getenv("CODING_MODEL", default_coding_model)
+        # Use configured model from utils (respects CODING_MODEL env var and LLM_PROVIDER)
+        # For Bedrock, use Bedrock model ID format; for others, use standard model names
+        model = CODING_MODEL_NAME
+        if LLM_PROVIDER == "bedrock" and AWS_BEDROCK_API_KEY and "/" not in model:
+            # Convert to Bedrock format if not already in it
+            model = f"us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+        
+        elif LLM_PROVIDER == "anthropic" and not model.startswith("anthropic/"):
+            # model = f"anthropic/{model}"
+            pass
+        elif LLM_PROVIDER == "openai" and not model.startswith("openai/"):
+            # model = f"openai/{model}"
+            pass
+
         # Pass model to parent Agent class (it has a model field)
         super().__init__(
             name=name,
@@ -316,6 +333,23 @@ class ClaudeCodeAgent(Agent):
     async def _run_async_impl(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
         """Execute Claude Agent with the implementation plan."""
         try:
+            state = ctx.session.state
+
+            if not CLAUDE_SDK_AVAILABLE:
+                install_hint = (
+                    "Error: `claude-agent-sdk` is required for Claude Code mode but is not installed.\n\n"
+                    "Install it in this environment:\n"
+                    "  uv pip install claude-agent-sdk\n\n"
+                    "Then run your command again."
+                )
+                logger.error(f"[Claude Code] [{self.name}] {CLAUDE_SDK_IMPORT_ERROR}")
+                state[self._output_key] = self._truncate_summary(install_hint)
+                yield Event(
+                    author=self.name,
+                    content=types.Content(role="model", parts=[types.Part.from_text(text=install_hint)]),
+                )
+                return
+
             # Get working directory
             working_dir = self._working_dir
             if not working_dir:
@@ -323,8 +357,6 @@ class ClaudeCodeAgent(Agent):
 
                 working_dir = tempfile.mkdtemp(prefix="claude_session_")
 
-            # Get state
-            state = ctx.session.state
             current_stage = state.get("current_stage")
 
             # Format stage information for the prompt

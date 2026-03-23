@@ -337,7 +337,7 @@ async def _llm_call(llm, prompt: str, model_name: str = None) -> str:
             "temperature": 0.3,
             "max_output_tokens": 4096,
         }
-        if LLM_PROVIDER != "bedrock":
+        if LLM_PROVIDER not in ("bedrock", "anthropic"):
             config_kwargs["top_p"] = 0.95
 
         llm_request = LlmRequest(

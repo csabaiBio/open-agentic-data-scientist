@@ -122,6 +122,17 @@ async def stop_project(project_id: str):
     return {"status": "stopped"}
 
 
+@app.post("/api/projects/{project_id}/resume")
+async def resume_project(project_id: str):
+    project = manager.get_project(project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    ok = await manager.resume_project(project_id)
+    if not ok:
+        raise HTTPException(400, f"Project cannot be resumed (status={project.status.value})")
+    return {"status": "running"}
+
+
 @app.delete("/api/projects/{project_id}")
 async def delete_project(project_id: str):
     ok = manager.delete_project(project_id)

@@ -17,7 +17,7 @@ classifiers = [
 dependencies = [
     "google-adk==1.18.0",
     "google-genai>=1.26.0",
-    "claude-agent-sdk>=0.1.5; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "claude-agent-sdk>=0.1.5",
     "click>=8.1.0",
     "aiofiles>=24.1.0",
     "python-dotenv>=1.0.0",

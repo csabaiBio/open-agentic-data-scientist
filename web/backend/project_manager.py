@@ -221,6 +221,68 @@ class ProjectManager:
             return True
         return False
 
+    async def resume_project(self, project_id: str) -> bool:
+        """Resume a stopped or failed project, re-running the analysis from scratch
+        but keeping all previously generated files in the working directory."""
+        project = self._projects.get(project_id)
+        if not project:
+            return False
+        if project.status not in (ProjectStatus.STOPPED, ProjectStatus.FAILED):
+            return False
+
+        # Guard against double-start
+        existing_task = self._running_tasks.get(project_id)
+        if existing_task and not existing_task.done():
+            return False
+
+        # Reset status
+        project.status = ProjectStatus.RUNNING
+        project.started_at = _now()
+        project.completed_at = None
+        project.error = None
+        
+        # For discovery mode, reset discovery phase to restart from scratch
+        if project.mode == ProjectMode.DISCOVERY:
+            project.discovery_phase = None
+            project.discovery = None
+        
+        self._save_project(project)
+
+        self._emit_event(project_id, ProjectEvent(
+            type="status",
+            content="Resuming project — existing files are preserved in the working directory.",
+            author="system",
+            timestamp=_now(),
+            metadata={"status": "running", "phase": "resume"},
+        ))
+
+        # Scan working directory so existing files are immediately visible in the API
+        self._scan_files(project)
+        self._save_project(project)
+
+        # Collect already-uploaded files so the agent can reference them
+        uploaded_files: List[tuple] = []
+        user_data_dir = self._get_project_working_dir(project_id) / "user_data"
+        if user_data_dir.exists():
+            for f in user_data_dir.iterdir():
+                if f.is_file():
+                    uploaded_files.append((f.name, f))
+
+        # For discovery mode, restart the full _run_project pipeline (discovery + analysis)
+        # For other modes, resume the analysis phase only
+        if project.mode == ProjectMode.DISCOVERY:
+            task = asyncio.create_task(
+                self._run_project(project_id, uploaded_files)
+            )
+        else:
+            analysis_query = project.analysis_query or project.query
+            task = asyncio.create_task(
+                self._run_analysis_safe(project_id, analysis_query, uploaded_files)
+            )
+        
+        self._running_tasks[project_id] = task
+        return True
+
     def subscribe(self, project_id: str) -> asyncio.Queue:
         """Subscribe to real-time events for a project."""
         if project_id not in self._event_queues:
@@ -489,6 +551,14 @@ class ProjectManager:
 
             elif event_type == "function_call":
                 tool_name = event_dict.get("name", "")
+                arguments = event_dict.get("arguments", {})
+
+                if tool_name == "Bash" and isinstance(arguments, dict) and not arguments.get("cwd"):
+                    arguments = {
+                        **arguments,
+                        "cwd": str(working_dir),
+                    }
+
                 # Track tool as a skill
                 if tool_name and tool_name not in seen_skills:
                     seen_skills.add(tool_name)
@@ -499,7 +569,7 @@ class ProjectManager:
                     content=tool_name,
                     author=event_dict.get("author", ""),
                     timestamp=event_dict.get("timestamp", _now()),
-                    metadata={"arguments": event_dict.get("arguments", {})},
+                    metadata={"arguments": arguments},
                 ))
 
             elif event_type == "function_response":
