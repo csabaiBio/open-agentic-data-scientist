@@ -19,20 +19,37 @@ load_dotenv(override=True)
 
 logger = logging.getLogger(__name__)
 
+# Configure LLM provider
+# Supported providers: "bedrock", "openrouter", "openai", "anthropic", "local"
+# Auto-detected from available API keys if LLM_PROVIDER is not set.
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "").lower()
 
 # Model configuration
-DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "openai/gpt-4.1-mini")
-REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
-CODING_MODEL_NAME = os.getenv("CODING_MODEL", "claude-sonnet-4-5")
+if LLM_PROVIDER == "openai":
+    DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", /gpt-4.1-mini")
+    REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
+    CODING_MODEL_NAME = os.getenv("CODING_MODEL", "gpt-4.1-mini")
+elif LLM_PROVIDER == "anthropic":
+    DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "claude-sonnet-4-5")
+    REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
+    CODING_MODEL_NAME = os.getenv("CODING_MODEL", "claude-sonnet-4-5")
+elif LLM_PROVIDER == "openrouter":
+    DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "anthropic/claude-sonnet-4")
+    REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
+    CODING_MODEL_NAME = os.getenv("CODING_MODEL", "claude-sonnet-4")
+elif LLM_PROVIDER == "bedrock":
+    DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+    REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
+    CODING_MODEL_NAME = os.getenv("CODING_MODEL", "bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+elif LLM_PROVIDER == "local":
+    DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "qwen-3:14b")
+    REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
+    CODING_MODEL_NAME = os.getenv("CODING_MODEL", "qwen-2.5-coder:14b")
 
 logger.info(f"[AgenticDS] DEFAULT_MODEL={DEFAULT_MODEL_NAME}")
 logger.info(f"[AgenticDS] REVIEW_MODEL={REVIEW_MODEL_NAME}")
 logger.info(f"[AgenticDS] CODING_MODEL={CODING_MODEL_NAME}")
 
-# Configure LLM provider
-# Supported providers: "bedrock", "openrouter", "openai", "anthropic", "local"
-# Auto-detected from available API keys if LLM_PROVIDER is not set.
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "").lower()
 
 # OpenRouter configuration
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
