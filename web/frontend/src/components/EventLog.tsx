@@ -37,6 +37,39 @@ function prettyAgentName(author: string): string {
     .trim() || author
 }
 
+function formatToolCallDetails(event: ProjectEvent): string {
+  const args = event.metadata?.arguments || {}
+
+  if (event.content === 'Bash') {
+    const command = typeof args.command === 'string' ? args.command : ''
+    const description = typeof args.description === 'string' ? args.description : ''
+    const cwd = typeof args.cwd === 'string' ? args.cwd : ''
+
+    const parts = []
+    if (description) parts.push(description)
+    if (command) parts.push(`$ ${command}`)
+    if (cwd) parts.push(`cwd: ${cwd}`)
+
+    return parts.join(' • ')
+  }
+
+  if (event.content === 'Read') {
+    const filePath = typeof args.file_path === 'string' ? args.file_path : ''
+    return filePath || ''
+  }
+
+  if (event.content === 'Write') {
+    const filePath = typeof args.file_path === 'string' ? args.file_path : ''
+    return filePath || ''
+  }
+
+  const entries = Object.entries(args)
+    .map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
+    .filter(Boolean)
+
+  return entries.join(' • ')
+}
+
 /* ── Markdown renderer with Tailwind prose classes ───────────── */
 
 function MarkdownContent({ content, className = '' }: { content: string; className?: string }) {
@@ -72,15 +105,18 @@ function EventCard({ event }: { event: ProjectEvent }) {
 
   // Tool calls — compact
   if (event.type === 'tool_call') {
+    const detail = formatToolCallDetails(event)
     return (
-      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-50/60 text-xs text-gray-500 font-mono animate-fade-in">
-        <Terminal className="w-3 h-3 text-cyan-400 flex-shrink-0" />
-        <span className="text-cyan-700 font-medium">{event.content}</span>
-        {event.metadata?.arguments && (
-          <span className="text-gray-400 truncate">
-            ({Object.keys(event.metadata.arguments).join(', ')})
-          </span>
-        )}
+      <div className="flex items-start gap-2 px-3 py-1.5 rounded-lg bg-gray-50/60 text-xs text-gray-500 font-mono animate-fade-in">
+        <Terminal className="w-3 h-3 text-cyan-400 flex-shrink-0 mt-0.5" />
+        <div className="min-w-0">
+          <span className="text-cyan-700 font-medium">{event.content}</span>
+          {detail && (
+            <div className="text-gray-500 mt-0.5 break-all whitespace-pre-wrap">
+              {detail}
+            </div>
+          )}
+        </div>
       </div>
     )
   }

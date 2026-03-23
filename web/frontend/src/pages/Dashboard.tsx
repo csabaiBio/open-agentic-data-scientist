@@ -332,7 +332,7 @@ export default function Dashboard() {
                               setCodingModel('us.anthropic.claude-sonnet-4-5-20250929-v1:0')
                               setModelApiBase('')
                             } else if (p.id === 'openai') {
-                              setPlanningModel('openai/gpt-4.1')
+                              setPlanningModel('openai/gpt-4.1-mini')
                               setCodingModel('')
                               setModelApiBase('')
                             } else if (p.id === 'anthropic') {

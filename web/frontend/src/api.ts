@@ -56,6 +56,11 @@ export async function stopProject(id: string): Promise<void> {
   if (!res.ok) throw new Error('Failed to stop project')
 }
 
+export async function resumeProject(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/projects/${id}/resume`, { method: 'POST' })
+  if (!res.ok) throw new Error('Failed to resume project')
+}
+
 export async function deleteProject(id: string): Promise<void> {
   const res = await fetch(`${BASE}/projects/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error('Failed to delete project')

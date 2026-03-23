@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { fetchProject, stopProject, generatePaper, getPaperPdfUrl, confirmDiscovery, subscribeToEvents } from '../api'
+import { fetchProject, stopProject, resumeProject, generatePaper, getPaperPdfUrl, confirmDiscovery, subscribeToEvents } from '../api'
 import type { Project, ProjectEvent } from '../types'
 import StatusBadge from '../components/StatusBadge'
 import StageProgress from '../components/StageProgress'
@@ -35,6 +35,7 @@ export default function ProjectDetail() {
   const [autoSetTab, setAutoSetTab] = useState(false)
   const [loading, setLoading] = useState(true)
   const [stopping, setStopping] = useState(false)
+  const [resuming, setResuming] = useState(false)
   const [generatingPaper, setGeneratingPaper] = useState(false)
   const [paperContent, setPaperContent] = useState<string | null>(null)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
@@ -155,6 +156,24 @@ export default function ProjectDetail() {
     }
   }
 
+  const handleResume = async () => {
+    if (!id) return
+    setResuming(true)
+    try {
+      await resumeProject(id)
+      // loadProject fetches the full project — backend already scanned files on disk
+      // so files/figures are immediately up-to-date after this call.
+      const fresh = await fetchProject(id)
+      setProject(fresh)
+      setEvents(fresh.events || [])
+    } catch (e) {
+      console.error('Failed to resume:', e)
+      alert('Failed to resume project. Please try again.')
+    } finally {
+      setResuming(false)
+    }
+  }
+
   const handleGeneratePaper = async () => {
     if (!id) return
     setGeneratingPaper(true)
@@ -193,6 +212,7 @@ export default function ProjectDetail() {
   const fileCount = project.files.filter(f => f.type !== 'figure').length
   const isRunning = project.status === 'running' || project.status === 'pending'
   const isCompleted = project.status === 'completed'
+  const isResumable = project.status === 'stopped' || project.status === 'failed'
   const isAwaitingConfirmation = project.status === 'awaiting_confirmation'
 
   const isDiscovery = project.mode === 'discovery'
@@ -258,6 +278,16 @@ export default function ProjectDetail() {
                 >
                   {stopping ? <Loader2 className="w-4 h-4 animate-spin" /> : <StopCircle className="w-4 h-4" />}
                   Stop
+                </button>
+              )}
+              {isResumable && (
+                <button
+                  onClick={handleResume}
+                  disabled={resuming}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 rounded-xl text-sm font-medium hover:bg-green-100 transition-colors disabled:opacity-50"
+                >
+                  {resuming ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  Resume
                 </button>
               )}
               {isCompleted && (

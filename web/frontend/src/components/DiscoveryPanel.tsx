@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm'
 import {
   Compass, BookOpen, FlaskConical, Lightbulb, Database,
   ChevronDown, ChevronRight, ExternalLink, FileText, Loader2,
-  Play, Pencil, Check
+  Play, Pencil, Check, AlertCircle, RotateCcw
 } from 'lucide-react'
 import type { DiscoveryResult, ProjectEvent } from '../types'
 
@@ -15,6 +15,9 @@ interface Props {
   analysisQuery: string | null
   isAwaitingConfirmation: boolean
   onConfirm: (analysisQuery: string) => void
+  error?: string | null
+  isRetrying?: boolean
+  onRetry?: () => void
 }
 
 const PHASE_LABELS: Record<string, { label: string; icon: typeof Compass }> = {
@@ -166,6 +169,7 @@ function MarkdownSection({ title, icon: Icon, content, color = 'violet' }: {
 export default function DiscoveryPanel({
   discovery, discoveryPhase, events,
   analysisQuery, isAwaitingConfirmation, onConfirm,
+  error, isRetrying = false, onRetry,
 }: Props) {
   const [editedQuery, setEditedQuery] = useState(analysisQuery || '')
   const [isEditing, setIsEditing] = useState(false)
@@ -188,6 +192,37 @@ export default function DiscoveryPanel({
     } finally {
       setConfirming(false)
     }
+  }
+
+  // Show error state when discovery has failed
+  if (error && !discovery) {
+    return (
+      <div className="space-y-4">
+        <div className="border border-red-200 rounded-xl bg-red-50/50 px-5 py-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <h4 className="text-sm font-semibold text-red-900 mb-1">Discovery Failed</h4>
+              <p className="text-sm text-red-800 leading-relaxed">{error}</p>
+              {onRetry && (
+                <button
+                  onClick={onRetry}
+                  disabled={isRetrying}
+                  className="mt-3 flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  {isRetrying ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="w-4 h-4" />
+                  )}
+                  {isRetrying ? 'Retrying...' : 'Retry Discovery'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   // During discovery, show live progress
