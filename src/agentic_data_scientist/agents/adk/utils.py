@@ -22,10 +22,10 @@ logger = logging.getLogger(__name__)
 # Configure LLM provider
 # Supported providers: "bedrock", "openrouter", "openai", "anthropic", "local"
 # Auto-detected from available API keys if LLM_PROVIDER is not set.
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "").lower()
-DEFAULT_MODEL_NAME = ""
-REVIEW_MODEL_NAME = ""
-CODING_MODEL_NAME = ""
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
+DEFAULT_MODEL_NAME = "gpt-4.1-mini"
+REVIEW_MODEL_NAME = "gpt-4.1-mini"
+CODING_MODEL_NAME = "gpt-4.1-mini"
 
 # Model configuration
 if LLM_PROVIDER == "openai":
@@ -47,7 +47,7 @@ elif LLM_PROVIDER == "bedrock":
 elif LLM_PROVIDER == "local":
     DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "qwen-3:14b")
     REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
-    CODING_MODEL_NAME = os.getenv("CODING_MODEL", "qwen-2.5-coder:14b")
+    CODING_MODEL_NAME = os.getenv("CODING_MODEL", "qwen2.5-coder:14b")
 
 logger.info(f"[AgenticDS] DEFAULT_MODEL={DEFAULT_MODEL_NAME}")
 logger.info(f"[AgenticDS] REVIEW_MODEL={REVIEW_MODEL_NAME}")
@@ -148,7 +148,8 @@ def _normalize_model_name(provider: str, model_name: str) -> str:
         return model_name
 
     if provider == "openai" and "/" not in model_name:
-        return f"openai/{model_name}"
+        # return f"openai/{model_name}"
+        return model_name
     if provider == "anthropic" and "/" not in model_name:
         return f"anthropic/{model_name}"
     if provider == "openrouter" and model_name.startswith("openrouter/"):
@@ -179,7 +180,7 @@ def resolve_model_name(model_config: Optional[dict], role: str = "planning") -> 
             elif provider == "bedrock":
                 model_name = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
             elif provider == "local":
-                model_name = "qwen-2.5-coder:14b"
+                model_name = "qwen2.5-coder:14b"
             else:
                 model_name = CODING_MODEL_NAME
         elif provider == "openrouter":

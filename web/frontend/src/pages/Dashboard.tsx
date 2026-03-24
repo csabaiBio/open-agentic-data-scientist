@@ -354,9 +354,9 @@ export default function Dashboard() {
                               setCodingModel('claude-sonnet-4-5-20250929')
                               setModelApiBase('')
                             } else if (p.id === 'local') {
-                              setPlanningModel('qwen-2.5-coder:14b-instruct-q4_K_M')
-                              setCodingModel('qwen-2.5-coder:14b')
-                              setModelApiBase('http://localhost:8000/v1')
+                              setPlanningModel('qwen3.5:14b')
+                              setCodingModel('qwen3.5:14b')
+                              setModelApiBase('http://localhost:11434')
                             } else {
                               setPlanningModel('')
                               setCodingModel('')
@@ -527,6 +527,25 @@ export default function Dashboard() {
                     </span>
                   </div>
                   <h3 className="text-sm font-medium text-gray-900 truncate">{p.query}</h3>
+                  {p.llm_config && (
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                      <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">
+                        <Server className="w-2.5 h-2.5" />
+                        {p.llm_config.provider === 'local' ? 'Local' : p.llm_config.provider}
+                      </span>
+                      {p.llm_config.planning_model && (
+                        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 font-mono" title="Planning model">
+                          {p.llm_config.planning_model.split('/').pop()}
+                        </span>
+                      )}
+                      {p.llm_config.coding_model && p.llm_config.coding_model !== p.llm_config.planning_model && (
+                        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-600 font-mono" title="Coding model">
+                          <Cpu className="w-2.5 h-2.5" />
+                          {p.llm_config.coding_model.split('/').pop()}
+                        </span>
+                      )}
+                    </div>
+                  )}
                   <div className="flex items-center gap-4 mt-2 text-xs text-gray-400">
                     <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />

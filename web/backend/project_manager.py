@@ -9,7 +9,7 @@ import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from dotenv import load_dotenv
 
@@ -51,6 +51,77 @@ def _classify_file(path: str) -> str:
     if ext in (".py", ".r", ".sh", ".ipynb"):
         return "code"
     return "other"
+
+
+def _render_structured_response(payload: Any) -> Optional[str]:
+    """Convert structured model payloads to concise user-facing text."""
+    obj = payload
+    if isinstance(obj, dict) and isinstance(obj.get("response"), dict):
+        obj = obj["response"]
+
+    if not isinstance(obj, dict):
+        return None
+
+    status = str(obj.get("status") or "").strip()
+    description = str(obj.get("description") or "").strip()
+    summary = obj.get("summary")
+    output_files = obj.get("output_files")
+
+    has_known_shape = any(k in obj for k in ("status", "description", "summary", "output_files"))
+    if not has_known_shape:
+        return None
+
+    lines: List[str] = []
+    if description:
+        lines.append(description)
+
+    if status and status.lower() != "success":
+        lines.append(f"Status: {status}")
+
+    if isinstance(summary, dict) and summary:
+        lines.append("")
+        lines.append("Summary:")
+        for _, value in sorted(summary.items(), key=lambda kv: kv[0]):
+            text = str(value).strip()
+            if text:
+                lines.append(f"- {text}")
+
+    if isinstance(output_files, list) and output_files:
+        lines.append("")
+        lines.append("Output files:")
+        for path in output_files:
+            path_str = str(path).strip()
+            if path_str:
+                lines.append(f"- {Path(path_str).name}")
+
+    rendered = "\n".join(lines).strip()
+    return rendered or None
+
+
+def _normalize_event_content(content: Any) -> str:
+    """Normalize event content to readable text for UI rendering."""
+    if content is None:
+        return ""
+
+    if isinstance(content, (dict, list)):
+        rendered = _render_structured_response(content)
+        if rendered:
+            return rendered
+        return json.dumps(content, ensure_ascii=False)
+
+    if isinstance(content, str):
+        text = content.strip()
+        if text and text[0] in "[{":
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                return content
+            rendered = _render_structured_response(parsed)
+            if rendered:
+                return rendered
+        return content
+
+    return str(content)
 
 
 class ProjectManager:
@@ -155,12 +226,25 @@ class ProjectManager:
                     discovery_phase=p.discovery_phase,
                     total_cost_usd=p.total_cost_usd,
                     llm_calls=p.llm_calls,
+                    llm_config=p.llm_config,
                 )
             )
         return summaries
 
     def get_project(self, project_id: str) -> Optional[Project]:
-        return self._projects.get(project_id)
+        project = self._projects.get(project_id)
+        if not project:
+            return None
+
+        # Keep artifact list fresh during active runs so UI tabs (files/figures)
+        # reflect newly generated outputs without requiring page re-entry.
+        if project.status in (ProjectStatus.RUNNING, ProjectStatus.PENDING):
+            before = len(project.files)
+            self._scan_files(project)
+            if len(project.files) != before:
+                self._save_project(project)
+
+        return project
 
     def create_project(self, req: ProjectCreate) -> Project:
         """Create a new project (does not start it)."""
@@ -549,7 +633,7 @@ class ProjectManager:
 
             if event_type == "message":
                 is_thought = event_dict.get("is_thought", False)
-                content = event_dict.get("content", "")
+                content = _normalize_event_content(event_dict.get("content", ""))
                 author = event_dict.get("author", "")
 
                 # Track agent as a skill

@@ -112,4 +112,5 @@ export interface ProjectSummary {
   discovery_phase: string | null
   total_cost_usd: number
   llm_calls: number
+  llm_config: ModelConfig | null
 }

@@ -25,7 +25,7 @@ fi
 
 # Start FastAPI backend
 echo -e "  \033[0;33mStarting backend (port 8765)...\033[0m"
-uv run python -m uvicorn web.backend.app:app --host 0.0.0.0 --port 8765 &
+uv run python -m uvicorn web.backend.app:app --host 0.0.0.0 --port 8765 --reload &
 BACKEND_PID=$!
 
 # Wait for backend to be ready before starting the frontend

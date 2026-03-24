@@ -60,6 +60,51 @@ load_dotenv(override=True)
 logger = logging.getLogger(__name__)
 
 
+def _normalize_model_for_claude_sdk(model: str, provider: str) -> str:
+    """Convert provider-routed model names to Claude SDK compatible IDs."""
+    if not model:
+        return model
+
+    normalized = str(model).strip()
+    provider = (provider or "").lower()
+
+    # Claude SDK expects Anthropic model IDs without provider prefixes.
+    if normalized.startswith("anthropic/"):
+        normalized = normalized.split("/", 1)[1]
+
+    # Some configs pass LiteLLM-style Bedrock routes.
+    if normalized.startswith("bedrock/"):
+        normalized = normalized.split("/", 1)[1]
+
+    # OpenRouter aliases often include provider namespace; Claude SDK does not.
+    if provider == "openrouter" and normalized.startswith("openrouter/"):
+        normalized = normalized.split("/", 1)[1]
+
+    return normalized
+
+
+def _augment_local_execution_prompt(prompt: str, attempt: int) -> str:
+    """Add strict execution instructions for local models that may answer text-only."""
+    base_instruction = (
+        "\n\nLOCAL EXECUTION REQUIREMENT:\n"
+        "You MUST actually use tools to create files and run commands in the working directory. "
+        "A text-only answer, JSON summary, or code snippet is NOT a valid completion. "
+        "Do not claim any file exists unless you created it with tools in this session. "
+        "Do not claim code was executed unless you ran it with tools in this session."
+    )
+
+    if attempt <= 0:
+        return prompt + base_instruction
+
+    retry_instruction = (
+        "\n\nRETRY REQUIRED:\n"
+        "Your previous response described an implementation but did not execute it. "
+        "Now perform the real execution using tools: write the files, run the commands, "
+        "verify outputs on disk, and only then report success."
+    )
+    return prompt + base_instruction + retry_instruction
+
+
 async def _query_via_proactor(prompt, options):
     """
     Bridge for Windows: run claude_agent_sdk.query() in a dedicated thread
@@ -276,6 +321,8 @@ class ClaudeCodeAgent(Agent):
         model = resolve_model_name(self._model_config, role="coding")
         if not model:
             model = CODING_MODEL_NAME
+
+        model = _normalize_model_for_claude_sdk(model, self._provider)
 
         if self._provider == "bedrock" and AWS_BEDROCK_API_KEY and "/" not in model:
             model = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
@@ -537,14 +584,6 @@ Requirements:
                 ),
             )
 
-            # Execute with Claude Code SDK - stream messages in real-time
-            output_lines = []
-            received_final_result = False  # After ResultMessage, keep draining to let SDK close cleanly
-
-            # Track tool calls to match with their results
-            # Claude uses tool_use_id to link ToolUseBlock with ToolResultBlock
-            tool_id_to_name = {}
-
             # CRITICAL MAPPING: Claude Agent SDK → Google GenAI → ADK Events
             #
             # Claude Message Types:
@@ -564,183 +603,206 @@ Requirements:
             #
             # This mapping ensures proper event parsing and emission.
 
-            # Stream messages as they arrive for real-time processing
-            # On Windows, uvicorn uses SelectorEventLoop which doesn't support
-            # subprocess creation. Use _query_via_proactor to bridge through
-            # a ProactorEventLoop in a separate thread.
-            query_source = (
-                _query_via_proactor(prompt, options)
-                if sys.platform == "win32"
-                else query(prompt=prompt, options=options)
-            )
-            try:
-                async for message in query_source:
+            max_attempts = 2 if self._provider == "local" else 1
+            final_output_lines = []
+
+            for attempt in range(max_attempts):
+                attempt_prompt = (
+                    _augment_local_execution_prompt(prompt, attempt)
+                    if self._provider == "local"
+                    else prompt
+                )
+
+                # Execute with Claude Code SDK - stream messages in real-time
+                output_lines = []
+                received_final_result = False  # After ResultMessage, keep draining to let SDK close cleanly
+                retry_required = False
+                saw_tool_use = False
+                saw_tool_result = False
+
+                # Track tool calls to match with their results
+                # Claude uses tool_use_id to link ToolUseBlock with ToolResultBlock
+                tool_id_to_name = {}
+
+                # Stream messages as they arrive for real-time processing
+                # On Windows, uvicorn uses SelectorEventLoop which doesn't support
+                # subprocess creation. Use _query_via_proactor to bridge through
+                # a ProactorEventLoop in a separate thread.
+                query_source = (
+                    _query_via_proactor(attempt_prompt, options)
+                    if sys.platform == "win32"
+                    else query(prompt=attempt_prompt, options=options)
+                )
+                try:
+                    async for message in query_source:
                     # If we've already seen the final ResultMessage, ignore any subsequent messages
                     # and continue draining so the SDK can shut down its internal task group cleanly.
-                    if received_final_result:
-                        continue
-                    if message is None:
-                        continue
+                        if received_final_result:
+                            continue
+                        if message is None:
+                            continue
 
-                    # Get the type name dynamically to avoid import issues
-                    message_type = type(message).__name__
+                        # Get the type name dynamically to avoid import issues
+                        message_type = type(message).__name__
 
-                    if message_type == "AssistantMessage":
+                        if message_type == "AssistantMessage":
                         # Assistant message contains content blocks - convert to Google GenAI Parts
                         # Each AssistantMessage becomes one Event with multiple Parts
-                        content_blocks = getattr(message, 'content', [])
+                            content_blocks = getattr(message, 'content', [])
 
                         # Collect all parts for a single Event
-                        google_parts = []
+                            google_parts = []
 
-                        for block in content_blocks:
-                            block_type = type(block).__name__
+                            for block in content_blocks:
+                                block_type = type(block).__name__
 
-                            if block_type == "TextBlock":
+                                if block_type == "TextBlock":
                                 # Regular text output from Claude
                                 # Map to: Part.from_text(text=...)
-                                text = getattr(block, 'text', '')
-                                if text:
-                                    output_lines.append(text)
-                                    google_parts.append(types.Part.from_text(text=text))
-                                    logger.info(f"[Claude Code] [TextBlock] {len(text)} chars")
+                                    text = getattr(block, 'text', '')
+                                    if text:
+                                        output_lines.append(text)
+                                        google_parts.append(types.Part.from_text(text=text))
+                                        logger.info(f"[Claude Code] [TextBlock] {len(text)} chars")
 
-                            elif block_type == "ThinkingBlock":
+                                elif block_type == "ThinkingBlock":
                                 # Extended thinking (if enabled)
                                 # Map to: Part(text=..., thought=True)
-                                thinking = getattr(block, 'thinking', '')
-                                if thinking:
-                                    logger.info(
-                                        f"[Claude Code] [ThinkingBlock] {len(thinking)} chars: {thinking[:100]}..."
-                                    )
-                                    # Create Part with thought flag set to True
-                                    # This will be parsed as MessageEvent with is_thought=True
-                                    google_parts.append(types.Part(text=thinking, thought=True))
+                                    thinking = getattr(block, 'thinking', '')
+                                    if thinking:
+                                        logger.info(
+                                            f"[Claude Code] [ThinkingBlock] {len(thinking)} chars: {thinking[:100]}..."
+                                        )
+                                        # Create Part with thought flag set to True
+                                        # This will be parsed as MessageEvent with is_thought=True
+                                        google_parts.append(types.Part(text=thinking, thought=True))
 
-                            elif block_type == "ToolUseBlock":
+                                elif block_type == "ToolUseBlock":
                                 # Claude is requesting to use a tool
                                 # Map to: Part.from_function_call(name=..., args=...)
-                                tool_id = getattr(block, 'id', '')
-                                tool_name = getattr(block, 'name', 'unknown')
-                                tool_input = getattr(block, 'input', {})
+                                    tool_id = getattr(block, 'id', '')
+                                    tool_name = getattr(block, 'name', 'unknown')
+                                    tool_input = getattr(block, 'input', {})
+                                    saw_tool_use = True
 
-                                logger.info(
-                                    f"[Claude Code] [ToolUseBlock] {tool_name} (id: {tool_id}) with args: {list(tool_input.keys())}"
-                                )
+                                    logger.info(
+                                        f"[Claude Code] [ToolUseBlock] {tool_name} (id: {tool_id}) with args: {list(tool_input.keys())}"
+                                    )
 
                                 # Store mapping from tool_use_id to tool_name for later matching
-                                if tool_id:
-                                    tool_id_to_name[tool_id] = tool_name
+                                    if tool_id:
+                                        tool_id_to_name[tool_id] = tool_name
 
                                 # Convert to Google GenAI function call format
                                 # This will be parsed as FunctionCallEvent downstream
-                                google_parts.append(types.Part.from_function_call(name=tool_name, args=tool_input))
+                                    google_parts.append(types.Part.from_function_call(name=tool_name, args=tool_input))
 
-                            else:
+                                else:
                                 # Unknown content block type in AssistantMessage
-                                logger.info(
-                                    f"[Claude Code] [AssistantMessage] Unknown ContentBlock type: {block_type} - {block}"
-                                )
-                                google_parts.append(types.Part.from_text(text=f"[Unknown block: {block_type}]"))
+                                    logger.info(
+                                        f"[Claude Code] [AssistantMessage] Unknown ContentBlock type: {block_type} - {block}"
+                                    )
+                                    google_parts.append(types.Part.from_text(text=f"[Unknown block: {block_type}]"))
 
                         # Yield a single Event with all converted Parts from this AssistantMessage
-                        if google_parts:
-                            yield Event(author=self.name, content=types.Content(role="model", parts=google_parts))
+                            if google_parts:
+                                yield Event(author=self.name, content=types.Content(role="model", parts=google_parts))
 
-                        usage_metadata = self._build_usage_metadata(getattr(message, 'usage', None))
-                        if usage_metadata:
-                            yield Event(
-                                author=self.name,
-                                usage_metadata=usage_metadata,
-                                custom_metadata={
-                                    "model": getattr(message, 'model', str(self.model) if self.model else ""),
-                                    "provider": LLM_PROVIDER,
-                                },
-                            )
+                            usage_metadata = self._build_usage_metadata(getattr(message, 'usage', None))
+                            if usage_metadata:
+                                yield Event(
+                                    author=self.name,
+                                    usage_metadata=usage_metadata,
+                                    custom_metadata={
+                                        "model": getattr(message, 'model', str(self.model) if self.model else ""),
+                                        "provider": LLM_PROVIDER,
+                                    },
+                                )
 
-                    elif message_type == "UserMessage":
+                        elif message_type == "UserMessage":
                         # User message - contains ToolResultBlock (tool execution results) and possibly TextBlock
                         # In Claude Agent SDK, tool results come back as UserMessage with ToolResultBlock
-                        content_blocks = getattr(message, 'content', [])
-                        logger.info(f"[Claude Code] Received UserMessage with {len(content_blocks)} content blocks")
+                            content_blocks = getattr(message, 'content', [])
+                            logger.info(f"[Claude Code] Received UserMessage with {len(content_blocks)} content blocks")
 
                         # Parse content blocks and convert to Google GenAI Parts
-                        google_parts = []
+                            google_parts = []
 
-                        for block in content_blocks:
-                            block_type = type(block).__name__
+                            for block in content_blocks:
+                                block_type = type(block).__name__
 
-                            if block_type == "ToolResultBlock":
+                                if block_type == "ToolResultBlock":
                                 # Result from a tool execution (comes from user/system after executing tool)
                                 # Map to: Part.from_function_response(name=..., response=...)
-                                tool_use_id = getattr(block, 'tool_use_id', '')
-                                is_error = getattr(block, 'is_error', False)
-                                content = getattr(block, 'content', '')
+                                    tool_use_id = getattr(block, 'tool_use_id', '')
+                                    is_error = getattr(block, 'is_error', False)
+                                    content = getattr(block, 'content', '')
+                                    saw_tool_result = True
 
                                 # Retrieve the tool name from our tracking dict
-                                tool_name = tool_id_to_name.get(tool_use_id, f"tool_{tool_use_id}")
+                                    tool_name = tool_id_to_name.get(tool_use_id, f"tool_{tool_use_id}")
 
                                 # Convert Claude's content format to Google's response format
                                 # Claude returns content as list of content items, Google expects dict
-                                response_data = {}
+                                    response_data = {}
 
-                                if isinstance(content, list):
+                                    if isinstance(content, list):
                                     # Extract text from content blocks
-                                    text_parts = []
-                                    for content_item in content:
-                                        if isinstance(content_item, dict):
-                                            if content_item.get('type') == 'text':
-                                                text_parts.append(content_item.get('text', ''))
-                                        elif hasattr(content_item, 'text'):
-                                            text_parts.append(getattr(content_item, 'text', ''))
+                                        text_parts = []
+                                        for content_item in content:
+                                            if isinstance(content_item, dict):
+                                                if content_item.get('type') == 'text':
+                                                    text_parts.append(content_item.get('text', ''))
+                                            elif hasattr(content_item, 'text'):
+                                                text_parts.append(getattr(content_item, 'text', ''))
 
-                                    combined_text = '\n'.join(text_parts) if text_parts else ''
-                                    if is_error:
-                                        response_data = {'error': combined_text}
-                                        logger.info(
-                                            f"[Claude Code] [ToolResultBlock] ERROR for {tool_name}: {combined_text[:200]}..."
-                                        )
+                                        combined_text = '\n'.join(text_parts) if text_parts else ''
+                                        if is_error:
+                                            response_data = {'error': combined_text}
+                                            logger.info(
+                                                f"[Claude Code] [ToolResultBlock] ERROR for {tool_name}: {combined_text[:200]}..."
+                                            )
+                                        else:
+                                            response_data = {'output': combined_text}
+                                            logger.info(
+                                                f"[Claude Code] [ToolResultBlock] SUCCESS for {tool_name}: {combined_text[:200]}..."
+                                            )
+                                    elif isinstance(content, str):
+                                        if is_error:
+                                            response_data = {'error': content}
+                                        else:
+                                            response_data = {'output': content}
+                                        logger.info(f"[Claude Code] [ToolResultBlock] {tool_name}: {content[:200]}...")
                                     else:
-                                        response_data = {'output': combined_text}
-                                        logger.info(
-                                            f"[Claude Code] [ToolResultBlock] SUCCESS for {tool_name}: {combined_text[:200]}..."
-                                        )
-                                elif isinstance(content, str):
-                                    if is_error:
-                                        response_data = {'error': content}
-                                    else:
-                                        response_data = {'output': content}
-                                    logger.info(f"[Claude Code] [ToolResultBlock] {tool_name}: {content[:200]}...")
-                                else:
                                     # Fallback for other content types
-                                    content_str = str(content)
-                                    if is_error:
-                                        response_data = {'error': content_str}
-                                    else:
-                                        response_data = {'output': content_str}
-                                    logger.info(
-                                        f"[Claude Code] [ToolResultBlock] {tool_name} (converted to str): {content_str[:200]}..."
-                                    )
+                                        content_str = str(content)
+                                        if is_error:
+                                            response_data = {'error': content_str}
+                                        else:
+                                            response_data = {'output': content_str}
+                                        logger.info(
+                                            f"[Claude Code] [ToolResultBlock] {tool_name} (converted to str): {content_str[:200]}..."
+                                        )
 
                                 # Convert to Google GenAI function response format
                                 # This will be parsed as FunctionResponseEvent downstream
-                                google_parts.append(
-                                    types.Part.from_function_response(name=tool_name, response=response_data)
-                                )
+                                    google_parts.append(
+                                        types.Part.from_function_response(name=tool_name, response=response_data)
+                                    )
 
-                            elif block_type == "TextBlock":
+                                elif block_type == "TextBlock":
                                 # User can also send text input
-                                text = getattr(block, 'text', '')
-                                if text:
-                                    logger.info(f"[Claude Code] [UserMessage.TextBlock] {len(text)} chars")
-                                    google_parts.append(types.Part.from_text(text=text))
+                                    text = getattr(block, 'text', '')
+                                    if text:
+                                        logger.info(f"[Claude Code] [UserMessage.TextBlock] {len(text)} chars")
+                                        google_parts.append(types.Part.from_text(text=text))
 
-                            else:
+                                else:
                                 # Unknown content block type in UserMessage
-                                logger.info(
-                                    f"[Claude Code] [UserMessage] Unknown ContentBlock type: {block_type} - {block}"
-                                )
-                                google_parts.append(types.Part.from_text(text=f"[Unknown user block: {block_type}]"))
+                                    logger.info(
+                                        f"[Claude Code] [UserMessage] Unknown ContentBlock type: {block_type} - {block}"
+                                    )
+                                    google_parts.append(types.Part.from_text(text=f"[Unknown user block: {block_type}]"))
 
                         # Yield Event with all converted Parts from this UserMessage
                         # Use role="model" since this is from the user/system executing tools
@@ -749,85 +811,115 @@ Requirements:
                         # if google_parts:
                         #     yield Event(author=self.name, content=types.Content(role="model", parts=google_parts))
 
-                    elif message_type == "SystemMessage":
+                        elif message_type == "SystemMessage":
                         # System message
-                        logger.info(f"[Claude Code] Received SystemMessage: {message}")
+                            logger.info(f"[Claude Code] Received SystemMessage: {message}")
 
-                    elif message_type == "ResultMessage":
+                        elif message_type == "ResultMessage":
                         # Final result from Claude - indicates task completion
-                        subtype = getattr(message, 'subtype', None)
+                            subtype = getattr(message, 'subtype', None)
 
-                        if subtype == 'success':
-                            result_text = "\n=== Task Completed Successfully ==="
-                            output_lines.append(result_text)
+                            if subtype == 'success':
+                                if self._provider == "local" and not (saw_tool_use or saw_tool_result):
+                                    if attempt + 1 < max_attempts:
+                                        retry_required = True
+                                        retry_text = (
+                                            "Local model returned a text-only implementation without executing any tools. "
+                                            "Retrying with stricter execution instructions..."
+                                        )
+                                        logger.warning(f"[Claude Code] [{self.name}] {retry_text}")
+                                        yield Event(
+                                            author=self.name,
+                                            content=types.Content(role="model", parts=[types.Part.from_text(text=retry_text)]),
+                                        )
+                                    else:
+                                        error_text = (
+                                            "Error: The local model described an implementation but did not actually execute any tools.\n\n"
+                                            "No code was run and any reported output files may be hypothetical. "
+                                            "Use a local backend/model that supports Claude Code tool use, or switch to a provider "
+                                            "with reliable tool execution."
+                                        )
+                                        output_lines.append(error_text)
+                                        state[self._output_key] = self._truncate_summary(error_text)
+                                        yield Event(
+                                            author=self.name,
+                                            content=types.Content(role="model", parts=[types.Part.from_text(text=error_text)]),
+                                        )
+                                else:
+                                    result_text = "\n=== Task Completed Successfully ==="
+                                    output_lines.append(result_text)
 
-                            # Create summary from all output and truncate to prevent downstream token overflow
-                            summary = "\n".join(output_lines)
-                            state[self._output_key] = self._truncate_summary(summary)
+                                    # Create summary from all output and truncate to prevent downstream token overflow
+                                    summary = "\n".join(output_lines)
+                                    state[self._output_key] = self._truncate_summary(summary)
+                                    final_output_lines = output_lines
 
-                            yield Event(
-                                author=self.name,
-                                content=types.Content(role="model", parts=[types.Part.from_text(text=result_text)]),
-                            )
-                        elif subtype == 'error':
-                            error_text = "\n=== Task Failed ==="
-                            error_details = getattr(message, 'error', '')
-                            if error_details:
-                                error_text += f"\nError: {error_details}"
+                                    yield Event(
+                                        author=self.name,
+                                        content=types.Content(role="model", parts=[types.Part.from_text(text=result_text)]),
+                                    )
+                            elif subtype == 'error':
+                                error_text = "\n=== Task Failed ==="
+                                error_details = getattr(message, 'error', '')
+                                if error_details:
+                                    error_text += f"\nError: {error_details}"
 
-                            output_lines.append(error_text)
-                            state[self._output_key] = self._truncate_summary(error_text)
+                                output_lines.append(error_text)
+                                state[self._output_key] = self._truncate_summary(error_text)
 
-                            yield Event(
-                                author=self.name,
-                                content=types.Content(role="model", parts=[types.Part.from_text(text=error_text)]),
-                            )
+                                yield Event(
+                                    author=self.name,
+                                    content=types.Content(role="model", parts=[types.Part.from_text(text=error_text)]),
+                                )
 
                         # Mark that we've received the final result but DO NOT break the loop.
                         # Draining the generator avoids injecting GeneratorExit into the SDK
                         # which triggers anyio cancel-scope cross-task errors.
-                        received_final_result = True
+                            received_final_result = True
 
-                    else:
+                        else:
                         # Unknown message type - log it with full details
-                        logger.info(f"[Claude Code] [Unknown Message type: {message_type}] - Message: {message}")
+                            logger.info(f"[Claude Code] [Unknown Message type: {message_type}] - Message: {message}")
 
                 # If no result message, create summary from output
-                if self._output_key not in state:
-                    summary = "\n".join(output_lines[-20:]) if output_lines else "Task completed (no output captured)"
-                    state[self._output_key] = self._truncate_summary(summary)
+                    if not retry_required:
+                        if self._output_key not in state:
+                            summary = "\n".join(output_lines[-20:]) if output_lines else "Task completed (no output captured)"
+                            state[self._output_key] = self._truncate_summary(summary)
+                        break
 
-            except asyncio.CancelledError:
-                # If the query was cancelled, just propagate the cancellation
-                logger.info(f"[Claude Code] [{self.name}] Agent cancelled during Claude query execution")
-                raise
-            except Exception as e:
-                # Specific handling for JSON buffer overflow errors
-                error_msg = str(e)
-                if "JSON message exceeded maximum buffer" in error_msg:
-                    logger.error(
-                        f"[Claude Code] [{self.name}] Claude SDK buffer overflow - likely tried to read file >1MB. "
-                        "Claude Agent SDK has a 1MB limit on tool response sizes."
-                    )
-                    summary = (
-                        "Error: File too large for Claude SDK buffer (>1MB limit).\n\n"
-                        "Claude attempted to read a large file which exceeded the internal 1MB buffer limit "
-                        "of the Claude Agent SDK subprocess communication channel.\n\n"
-                        "To fix this issue:\n"
-                        "1. Use command-line tools (head, tail, wc, ls -lh) to inspect file sizes and contents\n"
-                        "2. For large CSV/data files, use pandas with nrows parameter to load only portions\n"
-                        "3. Process large files in chunks rather than loading entirely\n"
-                        "4. Use streaming or iterative processing for files over 1MB\n\n"
-                        f"Full error: {error_msg[:500]}"
-                    )
-                    state[self._output_key] = self._truncate_summary(summary)
-                    yield Event(
-                        author=self.name,
-                        content=types.Content(role="model", parts=[types.Part.from_text(text=summary)]),
-                    )
-                else:
-                    # Re-raise other exceptions for generic handling
+                except asyncio.CancelledError:
+                    # If the query was cancelled, just propagate the cancellation
+                    logger.info(f"[Claude Code] [{self.name}] Agent cancelled during Claude query execution")
                     raise
+                except Exception as e:
+                    # Specific handling for JSON buffer overflow errors
+                    error_msg = str(e)
+                    if "JSON message exceeded maximum buffer" in error_msg:
+                        logger.error(
+                            f"[Claude Code] [{self.name}] Claude SDK buffer overflow - likely tried to read file >1MB. "
+                            "Claude Agent SDK has a 1MB limit on tool response sizes."
+                        )
+                        summary = (
+                            "Error: File too large for Claude SDK buffer (>1MB limit).\n\n"
+                            "Claude attempted to read a large file which exceeded the internal 1MB buffer limit "
+                            "of the Claude Agent SDK subprocess communication channel.\n\n"
+                            "To fix this issue:\n"
+                            "1. Use command-line tools (head, tail, wc, ls -lh) to inspect file sizes and contents\n"
+                            "2. For large CSV/data files, use pandas with nrows parameter to load only portions\n"
+                            "3. Process large files in chunks rather than loading entirely\n"
+                            "4. Use streaming or iterative processing for files over 1MB\n\n"
+                            f"Full error: {error_msg[:500]}"
+                        )
+                        state[self._output_key] = self._truncate_summary(summary)
+                        yield Event(
+                            author=self.name,
+                            content=types.Content(role="model", parts=[types.Part.from_text(text=summary)]),
+                        )
+                        break
+                    else:
+                        # Re-raise other exceptions for generic handling
+                        raise
 
         except Exception as e:
             # Generic exception handler for all other errors

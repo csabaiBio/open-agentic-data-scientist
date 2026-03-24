@@ -139,6 +139,7 @@ class ProjectSummary(BaseModel):
     discovery_phase: Optional[str] = None
     total_cost_usd: float = 0.0
     llm_calls: int = 0
+    llm_config: Optional[ModelConfig] = None
 
 
 class PaperRequest(BaseModel):
