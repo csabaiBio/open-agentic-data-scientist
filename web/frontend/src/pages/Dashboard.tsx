@@ -377,124 +377,122 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  {modelProvider && (
-                    <>
-                      {/* Planning Model */}
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">
-                          Planning / Review Model
-                        </label>
-                        <input
-                          value={planningModel}
-                          onChange={e => setPlanningModel(e.target.value)}
-                          placeholder={modelProvider === 'local' ? 'ollama/qwen3.5:27b' : 'Model ID'}
-                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
-                        />
-                        {modelProvider === 'local' && (
-                          <div className="flex flex-wrap gap-1 mt-1.5">
-                            {[
-                              'ollama/qwen3.5:27b',
-                              'ollama/qwen3-coder:30b',
-                              'ollama/glm-4.7-flash',
-                              'ollama/granite4',
-                              'ollama/qwen2.5-coder:32b',
-                              'ollama/deepseek-r1:14b',
-                              'ollama/llama4-maverick:17b',
-                            ].map(m => (
-                              <button
-                                key={m}
-                                onClick={() => setPlanningModel(m)}
-                                className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
-                                  planningModel === m ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-400 hover:text-gray-600'
-                                }`}
-                              >
-                                {m.split('/').pop()}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                  <>
+                    {/* Planning Model */}
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">
+                        Planning / Review Model
+                      </label>
+                      <input
+                        value={planningModel}
+                        onChange={e => setPlanningModel(e.target.value)}
+                        placeholder={modelProvider === 'local' ? 'ollama/qwen3.5:27b' : 'Leave empty for env default'}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
+                      />
+                      {modelProvider === 'local' && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {[
+                            'ollama/qwen3.5:27b',
+                            'ollama/qwen3-coder:30b',
+                            'ollama/glm-4.7-flash',
+                            'ollama/granite4',
+                            'ollama/qwen2.5-coder:32b',
+                            'ollama/deepseek-r1:14b',
+                            'ollama/llama4-maverick:17b',
+                          ].map(m => (
+                            <button
+                              key={m}
+                              onClick={() => setPlanningModel(m)}
+                              className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                                planningModel === m ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-400 hover:text-gray-600'
+                              }`}
+                            >
+                              {m.split('/').pop()}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
 
-                      {/* Coding Model */}
+                    {/* Coding Model */}
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">
+                        Coding Model <span className="text-gray-300">(Claude Code SDK)</span>
+                      </label>
+                      <input
+                        value={codingModel}
+                        onChange={e => setCodingModel(e.target.value)}
+                        placeholder="Leave empty for env default"
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
+                      />
+                      {modelProvider === 'local' && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {[
+                            'qwen3.5:27b',
+                            'qwen3-coder:30b',
+                            'qwen4:27b',
+                            'qwen4-coder:30b',
+                            'qwen2.5-coder:32b',
+                            'deepseek-r1:14b',
+                            'llama4-maverick:17b',
+                          ].map(m => (
+                            <button
+                              key={m}
+                              onClick={() => setCodingModel(m)}
+                              className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                                codingModel === m ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-400 hover:text-gray-600'
+                              }`}
+                            >
+                              {m.split('/').pop()}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <p className="text-[10px] text-gray-400 mt-1">
+                        Coding uses Claude Code CLI (requires Anthropic or Bedrock credentials)
+                      </p>
+                    </div>
+
+                    {/* API Base (for local) */}
+                    {modelProvider === 'local' && (
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">
-                          Coding Model <span className="text-gray-300">(Claude Code SDK)</span>
+                          API Base URL
                         </label>
                         <input
-                          value={codingModel}
-                          onChange={e => setCodingModel(e.target.value)}
-                          placeholder="Leave empty for default"
-                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
+                          value={modelApiBase}
+                          onChange={e => setModelApiBase(e.target.value)}
+                          placeholder="http://localhost:8000/v1"
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none font-mono"
                         />
-                        {modelProvider === 'local' && (
-                          <div className="flex flex-wrap gap-1 mt-1.5">
-                            {[
-                              'qwen3.5:27b',
-                              'qwen3-coder:30b',
-                              'qwen4:27b',
-                              'qwen4-coder:30b',
-                              'qwen2.5-coder:32b',
-                              'deepseek-r1:14b',
-                              'llama4-maverick:17b',
-                            ].map(m => (
-                              <button
-                                key={m}
-                                onClick={() => setCodingModel(m)}
-                                className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
-                                  codingModel === m ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-400 hover:text-gray-600'
-                                }`}
-                              >
-                                {m.split('/').pop()}
-                              </button>
-                            ))}
-                          </div>
-                        )}
                         <p className="text-[10px] text-gray-400 mt-1">
-                          Coding uses Claude Code CLI (requires Anthropic or Bedrock credentials)
+                          URL of your local inference server (vLLM, Ollama, TGI, etc.)
                         </p>
                       </div>
+                    )}
 
-                      {/* API Base (for local) */}
-                      {modelProvider === 'local' && (
-                        <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">
-                            API Base URL
-                          </label>
-                          <input
-                            value={modelApiBase}
-                            onChange={e => setModelApiBase(e.target.value)}
-                            placeholder="http://localhost:8000/v1"
-                            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none font-mono"
-                          />
-                          <p className="text-[10px] text-gray-400 mt-1">
-                            URL of your local inference server (vLLM, Ollama, TGI, etc.)
-                          </p>
-                        </div>
-                      )}
+                    {/* API Key (optional) */}
+                    {(modelProvider === 'openrouter' || modelProvider === 'openai' || modelProvider === 'anthropic' || modelProvider === 'local' || modelProvider === '') && (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">
+                          API Key <span className="text-gray-300">(optional)</span>
+                        </label>
+                        <input
+                          type="password"
+                          value={modelApiKey}
+                          onChange={e => setModelApiKey(e.target.value)}
+                          placeholder={modelProvider === 'local' ? 'Not needed for most local servers' : 'Leave empty for env default'}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
+                        />
+                      </div>
+                    )}
 
-                      {/* API Key (optional) */}
-                      {(modelProvider === 'openrouter' || modelProvider === 'openai' || modelProvider === 'anthropic' || modelProvider === 'local') && (
-                        <div>
-                          <label className="block text-xs font-medium text-gray-500 mb-1">
-                            API Key <span className="text-gray-300">(optional)</span>
-                          </label>
-                          <input
-                            type="password"
-                            value={modelApiKey}
-                            onChange={e => setModelApiKey(e.target.value)}
-                            placeholder={modelProvider === 'local' ? 'Not needed for most local servers' : 'API key'}
-                            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
-                          />
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                  {!modelProvider && (
-                    <p className="text-xs text-gray-400 pt-1">
-                      Using default models from environment configuration. Select a provider to customize.
-                    </p>
-                  )}
+                    {!modelProvider && (
+                      <p className="text-xs text-gray-400 pt-1">
+                        Using environment defaults unless you fill in overrides above.
+                      </p>
+                    )}
+                  </>
                 </div>
               )}
             </div>
