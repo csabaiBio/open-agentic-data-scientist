@@ -184,7 +184,7 @@ def resolve_model_name(model_config: Optional[dict], role: str = "planning") -> 
             else:
                 model_name = CODING_MODEL_NAME
         elif provider == "openrouter":
-            model_name = "anthropic/claude-sonnet-4"
+            model_name = "anthropic/claude-sonnet-4-5"
         elif provider == "anthropic":
             model_name = "anthropic/claude-sonnet-4-5"
         elif provider == "openai":
