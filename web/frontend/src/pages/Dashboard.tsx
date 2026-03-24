@@ -387,16 +387,19 @@ export default function Dashboard() {
                         <input
                           value={planningModel}
                           onChange={e => setPlanningModel(e.target.value)}
-                          placeholder={modelProvider === 'local' ? 'Qwen/Qwen3-Coder-480B-A35B-Instruct' : 'Model ID'}
+                          placeholder={modelProvider === 'local' ? 'ollama/qwen3.5:27b' : 'Model ID'}
                           className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
                         />
                         {modelProvider === 'local' && (
                           <div className="flex flex-wrap gap-1 mt-1.5">
                             {[
-                              'Qwen/Qwen3-Coder-480B-A35B-Instruct',
-                              'Qwen/Qwen2.5-Coder-32B-Instruct',
-                              'deepseek-ai/DeepSeek-R1-0528',
-                              'meta-llama/Llama-4-Maverick-17B-128E-Instruct',
+                              'ollama/qwen3.5:27b',
+                              'ollama/qwen3-coder:30b',
+                              'ollama/glm-4.7-flash',
+                              'ollama/granite4',
+                              'ollama/qwen2.5-coder:32b',
+                              'ollama/deepseek-r1:14b',
+                              'ollama/llama4-maverick:17b',
                             ].map(m => (
                               <button
                                 key={m}
@@ -423,6 +426,29 @@ export default function Dashboard() {
                           placeholder="Leave empty for default"
                           className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
                         />
+                        {modelProvider === 'local' && (
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {[
+                              'qwen3.5:27b',
+                              'qwen3-coder:30b',
+                              'qwen4:27b',
+                              'qwen4-coder:30b',
+                              'qwen2.5-coder:32b',
+                              'deepseek-r1:14b',
+                              'llama4-maverick:17b',
+                            ].map(m => (
+                              <button
+                                key={m}
+                                onClick={() => setCodingModel(m)}
+                                className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                                  codingModel === m ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-400 hover:text-gray-600'
+                                }`}
+                              >
+                                {m.split('/').pop()}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                         <p className="text-[10px] text-gray-400 mt-1">
                           Coding uses Claude Code CLI (requires Anthropic or Bedrock credentials)
                         </p>

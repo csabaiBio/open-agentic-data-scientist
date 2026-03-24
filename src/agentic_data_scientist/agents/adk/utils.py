@@ -155,8 +155,8 @@ def _normalize_model_name(provider: str, model_name: str) -> str:
     if provider == "openrouter" and model_name.startswith("openrouter/"):
         return model_name[len("openrouter/"):]
     if provider == "local" and not model_name.startswith(("openai/", "ollama/", "huggingface/")):
-        return model_name
-        # return f"openai/{model_name}"
+        # return model_name
+        return f"ollama/{model_name}"
     return model_name
 
 
