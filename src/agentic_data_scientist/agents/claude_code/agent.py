@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from google.adk.agents import Agent, InvocationContext
 from google.adk.events import Event
 from google.genai import types
+from pydantic import PrivateAttr
 
 from agentic_data_scientist.agents.adk.utils import (
     is_network_disabled,
@@ -227,9 +228,10 @@ class ClaudeCodeAgent(Agent):
     # Add model config to allow extra attributes
     model_config = {"extra": "allow"}
 
-    # Define working_dir and output_key as instance variables
-    _working_dir: Optional[str] = None
-    _output_key: str = "implementation_summary"
+    _working_dir: Optional[str] = PrivateAttr(default=None)
+    _output_key: str = PrivateAttr(default="implementation_summary")
+    _model_config: dict[str, Any] = PrivateAttr(default_factory=dict)
+    _provider: str = PrivateAttr(default="")
 
     def __init__(
         self,
