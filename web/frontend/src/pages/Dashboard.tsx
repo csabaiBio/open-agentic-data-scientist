@@ -343,7 +343,7 @@ export default function Dashboard() {
                               setModelApiBase('')
                             } else if (p.id === 'openai') {
                               setPlanningModel('openai/gpt-4.1-mini')
-                              setCodingModel('')
+                              setCodingModel('gpt-4.1-mini')
                               setModelApiBase('')
                             } else if (p.id === 'anthropic') {
                               setPlanningModel('claude-sonnet-4-5')
@@ -354,8 +354,8 @@ export default function Dashboard() {
                               setCodingModel('claude-sonnet-4-5-20250929')
                               setModelApiBase('')
                             } else if (p.id === 'local') {
-                              setPlanningModel('Qwen/Qwen3-Coder-480B-A35B-Instruct')
-                              setCodingModel('')
+                              setPlanningModel('qwen-2.5-coder:14b-instruct-q4_K_M')
+                              setCodingModel('qwen-2.5-coder:14b')
                               setModelApiBase('http://localhost:8000/v1')
                             } else {
                               setPlanningModel('')

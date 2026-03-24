@@ -25,6 +25,7 @@ from agentic_data_scientist.agents.adk.utils import (
     CODING_MODEL_NAME,
     AWS_BEDROCK_API_KEY,
     AWS_REGION_NAME,
+    resolve_model_name,
 )
 from agentic_data_scientist.agents.claude_code.templates import (
     get_claude_context,
@@ -236,6 +237,7 @@ class ClaudeCodeAgent(Agent):
         description: Optional[str] = None,
         working_dir: Optional[str] = None,
         output_key: str = "implementation_summary",
+        model_config: Optional[dict] = None,
         after_agent_callback: Optional[Any] = None,
         **kwargs: Any,
     ):
@@ -265,19 +267,16 @@ class ClaudeCodeAgent(Agent):
         The model is determined by CODING_MODEL environment variable or detected from LLM_PROVIDER.
         Bedrock requires a Bedrock-specific model ID; other providers use standard model names.
         """
-        # Use configured model from utils (respects CODING_MODEL env var and LLM_PROVIDER)
-        # For Bedrock, use Bedrock model ID format; for others, use standard model names
-        model = CODING_MODEL_NAME
-        if LLM_PROVIDER == "bedrock" and AWS_BEDROCK_API_KEY and "/" not in model:
-            # Convert to Bedrock format if not already in it
-            model = f"us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-        
-        elif LLM_PROVIDER == "anthropic" and not model.startswith("anthropic/"):
-            # model = f"anthropic/{model}"
-            pass
-        elif LLM_PROVIDER == "openai" and not model.startswith("openai/"):
-            # model = f"openai/{model}"
-            pass
+        self._model_config = model_config or {}
+        self._provider = (self._model_config.get("provider") or LLM_PROVIDER).lower()
+
+        # Resolve coding model from per-project config first, then provider defaults, then env.
+        model = resolve_model_name(self._model_config, role="coding")
+        if not model:
+            model = CODING_MODEL_NAME
+
+        if self._provider == "bedrock" and AWS_BEDROCK_API_KEY and "/" not in model:
+            model = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
         # Pass model to parent Agent class (it has a model field)
         super().__init__(
@@ -473,7 +472,7 @@ Requirements:
             system_instructions = get_claude_instructions(state=state, working_dir=working_dir)
 
             env = os.environ.copy()
-            env["ANTHROPIC_MODEL"] = self.model
+            env["ANTHROPIC_MODEL"] = str(self.model)
 
             # Ensure PATH includes common locations for the claude binary
             # This is critical when running from server processes (e.g. uvicorn)
@@ -502,11 +501,11 @@ Requirements:
                 logger.warning("[Claude Code] Could not find claude binary - SDK will attempt to find it")
 
             # Configure Bedrock for Claude Code if using Bedrock provider
-            bedrock_api_key = os.getenv("AWS_BEARER_TOKEN_BEDROCK") or os.getenv("AWS_BEDROCK_API_KEY")
-            if bedrock_api_key:
+            bedrock_api_key = self._model_config.get("api_key") or os.getenv("AWS_BEARER_TOKEN_BEDROCK") or os.getenv("AWS_BEDROCK_API_KEY")
+            if self._provider == "bedrock" and bedrock_api_key:
                 env["CLAUDE_CODE_USE_BEDROCK"] = "1"
                 env["AWS_BEARER_TOKEN_BEDROCK"] = bedrock_api_key
-                env["AWS_REGION"] = os.getenv("AWS_REGION_NAME", "us-east-1")
+                env["AWS_REGION"] = os.getenv("AWS_REGION_NAME", AWS_REGION_NAME)
 
             # Create options for Claude Agent SDK
             # Skills are loaded from .claude/skills/ via setting_sources

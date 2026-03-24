@@ -23,10 +23,13 @@ logger = logging.getLogger(__name__)
 # Supported providers: "bedrock", "openrouter", "openai", "anthropic", "local"
 # Auto-detected from available API keys if LLM_PROVIDER is not set.
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "").lower()
+DEFAULT_MODEL_NAME = ""
+REVIEW_MODEL_NAME = ""
+CODING_MODEL_NAME = ""
 
 # Model configuration
 if LLM_PROVIDER == "openai":
-    DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", /gpt-4.1-mini")
+    DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "gpt-4.1-mini")
     REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
     CODING_MODEL_NAME = os.getenv("CODING_MODEL", "gpt-4.1-mini")
 elif LLM_PROVIDER == "anthropic":
@@ -34,9 +37,9 @@ elif LLM_PROVIDER == "anthropic":
     REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
     CODING_MODEL_NAME = os.getenv("CODING_MODEL", "claude-sonnet-4-5")
 elif LLM_PROVIDER == "openrouter":
-    DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "anthropic/claude-sonnet-4")
+    DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "anthropic/claude-sonnet-4-5")
     REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
-    CODING_MODEL_NAME = os.getenv("CODING_MODEL", "claude-sonnet-4")
+    CODING_MODEL_NAME = os.getenv("CODING_MODEL", "claude-sonnet-4-5")
 elif LLM_PROVIDER == "bedrock":
     DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0")
     REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
@@ -167,7 +170,18 @@ def resolve_model_name(model_config: Optional[dict], role: str = "planning") -> 
 
     if not model_name:
         if role == "coding":
-            model_name = CODING_MODEL_NAME
+            if provider == "openrouter":
+                model_name = "claude-sonnet-4-5"
+            elif provider == "anthropic":
+                model_name = "claude-sonnet-4-5"
+            elif provider == "openai":
+                model_name = "gpt-4.1-mini"
+            elif provider == "bedrock":
+                model_name = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+            elif provider == "local":
+                model_name = "qwen-2.5-coder:14b"
+            else:
+                model_name = CODING_MODEL_NAME
         elif provider == "openrouter":
             model_name = "anthropic/claude-sonnet-4"
         elif provider == "anthropic":

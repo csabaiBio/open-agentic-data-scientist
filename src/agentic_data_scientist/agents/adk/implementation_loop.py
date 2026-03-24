@@ -86,17 +86,12 @@ def make_implementation_agents(working_dir: str, tools: list, model_config: dict
         overlap_size=20,
     )
 
-    # If model_config specifies a coding model, pass it to ClaudeCodeAgent
-    coding_kwargs = {}
-    if model_config and model_config.get("coding_model"):
-        import os
-        os.environ["CODING_MODEL"] = model_config["coding_model"]
-
     coding_agent = ClaudeCodeAgent(
         name="coding_agent",
         description="A coding agent that uses Claude Code SDK to implement plans.",
         working_dir=working_dir,
         output_key="implementation_summary",
+        model_config=model_config,
         after_agent_callback=coding_compression_callback,  # Explicit callback for event compression
     )
 

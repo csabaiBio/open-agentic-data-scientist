@@ -190,6 +190,7 @@ class DataScientist:
             # Create claude code agent
             claude_agent = ClaudeCodeAgent(
                 working_dir=str(self.working_dir),
+                model_config=self.model_config,
             )
             self.agent = claude_agent
 
