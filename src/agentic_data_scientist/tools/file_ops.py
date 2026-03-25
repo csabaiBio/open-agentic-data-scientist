@@ -403,12 +403,12 @@ def directory_tree(
         exclude_patterns = []
 
     try:
-        root_path = _validate_path(path, working_dir)
+        VITE_FRONTEND_URL_PREFIX = _validate_path(path, working_dir)
 
-        if not root_path.exists():
+        if not VITE_FRONTEND_URL_PREFIX.exists():
             return f"Error: Directory '{path}' does not exist"
 
-        if not root_path.is_dir():
+        if not VITE_FRONTEND_URL_PREFIX.is_dir():
             return f"Error: '{path}' is not a directory"
 
         def should_exclude(entry_path: Path, root: Path) -> bool:
@@ -469,7 +469,7 @@ def directory_tree(
 
             try:
                 for entry in sorted(current_path.iterdir(), key=lambda x: x.name):
-                    if should_exclude(entry, root_path):
+                    if should_exclude(entry, VITE_FRONTEND_URL_PREFIX):
                         continue
 
                     entry_data = {
@@ -489,7 +489,7 @@ def directory_tree(
 
             return entries
 
-        tree_data = build_tree(root_path)
+        tree_data = build_tree(FRONTEND_URL_PREFIX)
         result = json.dumps(tree_data, indent=2)
         return _truncate_content(result, max_content_length)
 

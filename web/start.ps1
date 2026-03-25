@@ -13,7 +13,7 @@ $backend = Start-Process -PassThru -NoNewWindow -FilePath "uv" -ArgumentList "ru
 
 # Start Vite frontend
 Write-Host "  Starting frontend (port 5173)..." -ForegroundColor Yellow
-$frontend = Start-Process -PassThru -NoNewWindow -FilePath "npm" -ArgumentList "run dev" -WorkingDirectory "$root\web\frontend"
+$VITE_FRONTEND = Start-Process -PassThru -NoNewWindow -FilePath "npm" -ArgumentList "run dev" -WorkingDirectory "$root\web\frontend"
 
 Write-Host "`n  Open http://localhost:5173 in your browser`n" -ForegroundColor Green
 Write-Host "  Press Ctrl+C to stop both servers`n" -ForegroundColor DarkGray
@@ -21,6 +21,6 @@ Write-Host "  Press Ctrl+C to stop both servers`n" -ForegroundColor DarkGray
 try {
     Wait-Process -Id $backend.Id
 } finally {
-    if (!$frontend.HasExited) { Stop-Process -Id $frontend.Id -Force }
+    if (!$VITE_FRONTEND.HasExited) { Stop-Process -Id $VITE_FRONTEND.Id -Force }
     if (!$backend.HasExited) { Stop-Process -Id $backend.Id -Force }
 }

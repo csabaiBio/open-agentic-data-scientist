@@ -14,6 +14,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Loader2, Play } from 'lucide-react'
+import { getFileUrl } from '../api'
 import type { ProjectEvent, Stage, GeneratedFile } from '../types'
 
 // ── Story Data Types ────────────────────────────────────────────
@@ -96,7 +97,7 @@ function mapFiguresToStages(files: GeneratedFile[], projectId: string): Record<n
     const stageNum = m ? parseInt(m[1]) : (f.stage_index != null ? f.stage_index + 1 : 1)
     if (!map[stageNum]) map[stageNum] = { names: [], paths: [] }
     map[stageNum].names.push(name)
-    map[stageNum].paths.push(`/api/projects/${projectId}/files/${f.path.replace(/\\/g, '/')}`)
+    map[stageNum].paths.push(getFileUrl(projectId, f.path.replace(/\\/g, '/')))
   }
   return map
 }

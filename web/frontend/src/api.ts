@@ -1,6 +1,6 @@
 import type { Project, ProjectEvent, ProjectSummary } from './types'
 
-const BASE = '/api'
+const BASE = new URL('api/', `${window.location.origin}${import.meta.env.BASE_URL}`).pathname.replace(/\/$/, '')
 
 export async function fetchProjects(): Promise<ProjectSummary[]> {
   const res = await fetch(`${BASE}/projects`)
