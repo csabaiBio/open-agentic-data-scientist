@@ -298,6 +298,11 @@ export default function ProjectDetail() {
                   <span className="text-xs font-semibold uppercase tracking-wide">Project Cost</span>
                 </div>
                 <div className="text-xl font-bold text-emerald-900">{formatUsd(project.total_cost_usd)}</div>
+                {typeof project.max_cost_usd === 'number' && project.max_cost_usd > 0 && (
+                  <div className="text-[11px] text-emerald-700 mt-1">
+                    {formatUsd(project.total_cost_usd)} / {formatUsd(project.max_cost_usd)}
+                  </div>
+                )}
                 <div className="text-[11px] text-emerald-700 mt-1">{project.llm_calls} LLM call{project.llm_calls === 1 ? '' : 's'}</div>
               </div>
 

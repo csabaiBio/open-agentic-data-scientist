@@ -59,6 +59,7 @@ async def create_project(
     mode: str = Form("orchestrated"),
     num_papers: int = Form(10),
     days_back: int = Form(30),
+    max_cost_usd: float = Form(0.0),
     model_provider: str = Form(""),
     planning_model: str = Form(""),
     coding_model: str = Form(""),
@@ -90,6 +91,7 @@ async def create_project(
         query=query, mode=project_mode,
         num_papers=max(1, min(20, num_papers)),
         days_back=max(1, min(180, days_back)),
+        max_cost_usd=max_cost_usd if max_cost_usd > 0 else None,
         llm_config=mc,
         base_project_id=base_project_id or None,
     )

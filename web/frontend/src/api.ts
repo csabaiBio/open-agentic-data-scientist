@@ -20,6 +20,7 @@ export interface CreateProjectOpts {
   files: File[]
   numPapers?: number
   daysBack?: number
+  maxCostUsd?: number
   modelProvider?: string
   planningModel?: string
   codingModel?: string
@@ -34,6 +35,9 @@ export async function createProject(opts: CreateProjectOpts): Promise<Project> {
   form.append('mode', opts.mode)
   form.append('num_papers', String(opts.numPapers ?? 10))
   form.append('days_back', String(opts.daysBack ?? 30))
+  if (typeof opts.maxCostUsd === 'number' && opts.maxCostUsd > 0) {
+    form.append('max_cost_usd', String(opts.maxCostUsd))
+  }
   if (opts.modelProvider) form.append('model_provider', opts.modelProvider)
   if (opts.planningModel) form.append('planning_model', opts.planningModel)
   if (opts.codingModel) form.append('coding_model', opts.codingModel)

@@ -83,6 +83,7 @@ class ProjectCreate(BaseModel):
     files: List[str] = Field(default_factory=list)
     num_papers: int = 10
     days_back: int = 30
+    max_cost_usd: Optional[float] = None
     llm_config: Optional[ModelConfig] = None
     base_project_id: Optional[str] = None  # inherit outputs from this project
 
@@ -106,6 +107,7 @@ class Project(BaseModel):
     # Discovery-specific
     num_papers: int = 10
     days_back: int = 30
+    max_cost_usd: Optional[float] = None
     discovery: Optional[DiscoveryResult] = None
     discovery_phase: Optional[str] = None  # current phase of discovery
     analysis_query: Optional[str] = None  # the research question (editable by user before analysis)
@@ -138,6 +140,7 @@ class ProjectSummary(BaseModel):
     files_count: int = 0
     discovery_phase: Optional[str] = None
     total_cost_usd: float = 0.0
+    max_cost_usd: Optional[float] = None
     llm_calls: int = 0
     llm_config: Optional[ModelConfig] = None
 

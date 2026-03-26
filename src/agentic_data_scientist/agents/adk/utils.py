@@ -199,7 +199,6 @@ def _normalize_model_name(provider: str, model_name: str) -> str:
         return model_name[len("openrouter/"):]
     if provider == "local" and not model_name.startswith(("openai/", "ollama/", "huggingface/")):
         return model_name
-        # return f"ollama/{model_name}"
     return model_name
 
 
@@ -370,6 +369,7 @@ def create_litellm_model(model_name: str, num_retries: int = 10, timeout: int = 
             "model": model_name,
             "num_retries": num_retries,
             "timeout": timeout,
+            "custom_llm_provider": "openai",
         }
         if effective_api_base:
             kwargs["api_base"] = effective_api_base

@@ -50,6 +50,7 @@ export default function Dashboard() {
   const [codingModel, setCodingModel] = useState('')
   const [modelApiBase, setModelApiBase] = useState('')
   const [modelApiKey, setModelApiKey] = useState('')
+  const [maxCostUsd, setMaxCostUsd] = useState<number | ''>('')
   const [baseProjectId, setBaseProjectId] = useState<string>('')
 
   const load = useCallback(async () => {
@@ -84,6 +85,7 @@ export default function Dashboard() {
         codingModel: codingModel || undefined,
         modelApiBase: modelApiBase || undefined,
         modelApiKey: modelApiKey || undefined,
+        maxCostUsd: typeof maxCostUsd === 'number' && maxCostUsd > 0 ? maxCostUsd : undefined,
         baseProjectId: baseProjectId || undefined,
       })
       navigate(`/project/${project.id}`)
@@ -506,6 +508,27 @@ export default function Dashboard() {
                       </div>
                     )}
 
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">
+                        Max Cost (USD) <span className="text-gray-300">(optional stop limit)</span>
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value="3.00" //value={maxCostUsd}
+                        onChange={e => {
+                          const value = e.target.value
+                          setMaxCostUsd(value === '' ? '' : Math.max(0, Number(value)))
+                        }}
+                        placeholder="e.g. 2.50"
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
+                      />
+                      <p className="text-[10px] text-gray-400 mt-1">
+                        Project stops automatically once total LLM cost reaches this amount.
+                      </p>
+                    </div>
+
                     {!modelProvider && (
                       <p className="text-xs text-gray-400 pt-1">
                         Using environment defaults unless you fill in overrides above.
@@ -608,6 +631,11 @@ export default function Dashboard() {
                       <Coins className="w-3 h-3" />
                       {formatUsd(p.total_cost_usd)}
                     </span>
+                    {typeof p.max_cost_usd === 'number' && p.max_cost_usd > 0 && (
+                      <span className="flex items-center gap-1 text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-md">
+                        Limit: {formatUsd(p.max_cost_usd)}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <button

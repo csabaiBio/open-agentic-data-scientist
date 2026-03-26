@@ -34,6 +34,7 @@ from .project_inheritance import inherit_from_base_project
 logger = logging.getLogger(__name__)
 
 PROJECTS_DIR = Path(os.getenv("PROJECTS_DIR", "./projects")).resolve()
+COST_LIMIT_REACHED = "COST_LIMIT_REACHED"
 
 
 def _now() -> str:
@@ -225,6 +226,7 @@ class ProjectManager:
                     files_count=len(p.files),
                     discovery_phase=p.discovery_phase,
                     total_cost_usd=p.total_cost_usd,
+                    max_cost_usd=p.max_cost_usd,
                     llm_calls=p.llm_calls,
                     llm_config=p.llm_config,
                 )
@@ -259,6 +261,7 @@ class ProjectManager:
             input_files=req.files,
             num_papers=req.num_papers,
             days_back=req.days_back,
+            max_cost_usd=req.max_cost_usd,
             llm_config=req.llm_config,
             base_project_id=req.base_project_id,
         )
@@ -405,6 +408,35 @@ class ProjectManager:
         project.total_cached_tokens += int(usage.get("cached_input_tokens", 0) or 0)
         project.total_tokens += int(usage.get("total_tokens", 0) or 0)
 
+    def _is_cost_limit_reached(self, project: Project) -> bool:
+        """Return True when total run cost meets/exceeds the configured limit."""
+        if project.max_cost_usd is None:
+            return False
+        return float(project.total_cost_usd or 0.0) >= float(project.max_cost_usd)
+
+    def _stop_for_cost_limit(self, project_id: str, project: Project):
+        """Stop project execution because configured max cost was reached."""
+        message = (
+            f"Cost threshold reached: ${project.total_cost_usd:.4f} "
+            f"(limit ${float(project.max_cost_usd or 0.0):.4f})."
+        )
+        project.status = ProjectStatus.STOPPED
+        project.error = message
+        project.completed_at = _now()
+        self._save_project(project)
+        self._emit_event(project_id, ProjectEvent(
+            type="status",
+            content=message,
+            author="system",
+            timestamp=_now(),
+            metadata={
+                "status": "stopped",
+                "reason": "cost_limit",
+                "total_cost_usd": project.total_cost_usd,
+                "max_cost_usd": project.max_cost_usd,
+            },
+        ))
+
     async def start_project(self, project_id: str, uploaded_files: List[tuple] = None):
         """Start running a project in the background."""
         project = self._projects.get(project_id)
@@ -452,6 +484,9 @@ class ProjectManager:
                             "llm_call_index": project.llm_calls,
                             "total_cost_usd": project.total_cost_usd,
                         }
+                        if self._is_cost_limit_reached(project):
+                            self._stop_for_cost_limit(project_id, project)
+                            raise RuntimeError(COST_LIMIT_REACHED)
                     self._emit_event(project_id, ProjectEvent(
                         type=event_type,
                         content=content,
@@ -514,6 +549,10 @@ class ProjectManager:
             project.completed_at = _now()
             self._save_project(project)
         except Exception as e:
+            if str(e) == COST_LIMIT_REACHED:
+                if project.status == ProjectStatus.RUNNING:
+                    self._stop_for_cost_limit(project_id, project)
+                return
             logger.exception(f"Project {project_id} failed")
             project.status = ProjectStatus.FAILED
             project.error = str(e)
@@ -718,6 +757,9 @@ class ProjectManager:
                     metadata=metadata,
                 ))
                 self._save_project(project)
+                if self._is_cost_limit_reached(project):
+                    self._stop_for_cost_limit(project_id, project)
+                    break
 
             elif event_type == "error":
                 project.error = event_dict.get("content", "Unknown error")

@@ -80,6 +80,7 @@ export interface Project {
   input_files: string[]
   num_papers: number
   days_back: number
+  max_cost_usd: number | null
   discovery: DiscoveryResult | null
   discovery_phase: string | null
   analysis_query: string | null
@@ -111,6 +112,7 @@ export interface ProjectSummary {
   files_count: number
   discovery_phase: string | null
   total_cost_usd: number
+  max_cost_usd: number | null
   llm_calls: number
   llm_config: ModelConfig | null
 }
