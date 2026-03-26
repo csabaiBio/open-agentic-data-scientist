@@ -591,7 +591,12 @@ def create_agent(
         sub_agents=[
             plan_maker_agent,
             plan_reviewer_agent,
-            create_review_confirmation_agent(auto_exit_on_completion=True, prompt_name="plan_review_confirmation"),
+            create_review_confirmation_agent(
+                auto_exit_on_completion=True,
+                prompt_name="plan_review_confirmation",
+                model_override=review_model,
+                provider_override=provider_for_config,
+            ),
         ],
         max_iterations=10,
     )

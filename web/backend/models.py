@@ -73,7 +73,9 @@ class ModelConfig(BaseModel):
     provider: str = "openai"  # bedrock, openrouter, openai, anthropic, local
     planning_model: str = ""  # model ID for planning/review/summary agents (LiteLLM)
     coding_model: str = ""  # model ID for coding agent (Claude Code SDK)
-    api_base: Optional[str] = None  # base URL for local provider (vLLM, Ollama, TGI)
+    litellm_api_base: Optional[str] = None  # base URL for LiteLLM calls (planning/review/default)
+    coding_api_base: Optional[str] = None  # base URL for Claude Code SDK calls (coding)
+    api_base: Optional[str] = None  # deprecated compatibility field
     api_key: Optional[str] = None  # optional API key
 
 
@@ -155,3 +157,7 @@ class PaperResponse(BaseModel):
     content: str
     format: str = "markdown"
     title: str = ""
+
+
+class CostLimitUpdateRequest(BaseModel):
+    max_cost_usd: Optional[float] = None

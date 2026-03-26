@@ -139,6 +139,9 @@ def make_implementation_agents(working_dir: str, tools: list, model_config: dict
         coding_agent,
         review_agent,
         create_review_confirmation_agent(
-            auto_exit_on_completion=True, prompt_name="implementation_review_confirmation"
+            auto_exit_on_completion=True,
+            prompt_name="implementation_review_confirmation",
+            model_override=impl_review_model,
+            provider_override=provider_for_config,
         ),
     )

@@ -24,7 +24,8 @@ export interface CreateProjectOpts {
   modelProvider?: string
   planningModel?: string
   codingModel?: string
-  modelApiBase?: string
+  modelLitellmApiBase?: string
+  modelCodingApiBase?: string
   modelApiKey?: string
   baseProjectId?: string
 }
@@ -41,7 +42,8 @@ export async function createProject(opts: CreateProjectOpts): Promise<Project> {
   if (opts.modelProvider) form.append('model_provider', opts.modelProvider)
   if (opts.planningModel) form.append('planning_model', opts.planningModel)
   if (opts.codingModel) form.append('coding_model', opts.codingModel)
-  if (opts.modelApiBase) form.append('model_api_base', opts.modelApiBase)
+  if (opts.modelLitellmApiBase) form.append('model_litellm_api_base', opts.modelLitellmApiBase)
+  if (opts.modelCodingApiBase) form.append('model_coding_api_base', opts.modelCodingApiBase)
   if (opts.modelApiKey) form.append('model_api_key', opts.modelApiKey)
   if (opts.baseProjectId) form.append('base_project_id', opts.baseProjectId)
   for (const f of opts.files) {
@@ -63,6 +65,16 @@ export async function stopProject(id: string): Promise<void> {
 export async function resumeProject(id: string): Promise<void> {
   const res = await fetch(`${BASE}/projects/${id}/resume`, { method: 'POST' })
   if (!res.ok) throw new Error('Failed to resume project')
+}
+
+export async function updateProjectCostLimit(id: string, maxCostUsd?: number): Promise<{ status: string; max_cost_usd: number | null; total_cost_usd: number }> {
+  const res = await fetch(`${BASE}/projects/${id}/cost-limit`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ max_cost_usd: typeof maxCostUsd === 'number' && maxCostUsd > 0 ? maxCostUsd : null }),
+  })
+  if (!res.ok) throw new Error('Failed to update cost limit')
+  return res.json()
 }
 
 export async function deleteProject(id: string): Promise<void> {

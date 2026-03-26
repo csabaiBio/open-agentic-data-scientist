@@ -48,7 +48,8 @@ export default function Dashboard() {
   const [modelProvider, setModelProvider] = useState<string>('')
   const [planningModel, setPlanningModel] = useState('')
   const [codingModel, setCodingModel] = useState('')
-  const [modelApiBase, setModelApiBase] = useState('')
+  const [modelLitellmApiBase, setModelLitellmApiBase] = useState('')
+  const [modelCodingApiBase, setModelCodingApiBase] = useState('')
   const [modelApiKey, setModelApiKey] = useState('')
   const [maxCostUsd, setMaxCostUsd] = useState<number | ''>('')
   const [baseProjectId, setBaseProjectId] = useState<string>('')
@@ -83,7 +84,8 @@ export default function Dashboard() {
         modelProvider: modelProvider || undefined,
         planningModel: planningModel || undefined,
         codingModel: codingModel || undefined,
-        modelApiBase: modelApiBase || undefined,
+        modelLitellmApiBase: modelLitellmApiBase || undefined,
+        modelCodingApiBase: modelCodingApiBase || undefined,
         modelApiKey: modelApiKey || undefined,
         maxCostUsd: typeof maxCostUsd === 'number' && maxCostUsd > 0 ? maxCostUsd : undefined,
         baseProjectId: baseProjectId || undefined,
@@ -342,27 +344,33 @@ export default function Dashboard() {
                             if (p.id === 'bedrock') {
                               setPlanningModel('bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0')
                               setCodingModel('us.anthropic.claude-sonnet-4-5-20250929-v1:0')
-                              setModelApiBase('')
+                              setModelLitellmApiBase('')
+                              setModelCodingApiBase('')
                             } else if (p.id === 'openai') {
                               setPlanningModel('gpt-4.1-mini')
                               setCodingModel('claude-sonnet-4-5-20250929')
-                              setModelApiBase('https://api.anthropic.com')
+                              setModelLitellmApiBase('https://api.openai.com/v1')
+                              setModelCodingApiBase('https://api.anthropic.com')
                             } else if (p.id === 'anthropic') {
                               setPlanningModel('claude-sonnet-4-5')
                               setCodingModel('claude-sonnet-4-5-20250929')
-                              setModelApiBase('https://api.anthropic.com')
+                              setModelLitellmApiBase('https://api.anthropic.com')
+                              setModelCodingApiBase('https://api.anthropic.com')
                             } else if (p.id === 'openrouter') {
                               setPlanningModel('anthropic/claude-sonnet-4-5')
                               setCodingModel('claude-sonnet-4-5-20250929')
-                              setModelApiBase('https://api.anthropic.com')
+                              setModelLitellmApiBase('https://openrouter.ai/api/v1')
+                              setModelCodingApiBase('https://api.anthropic.com')
                             } else if (p.id === 'local') {
                               setPlanningModel('qwen3.5:27b')
                               setCodingModel('qwen3-coder:30b')
-                              setModelApiBase('http://localhost:11434')
+                              setModelLitellmApiBase('http://localhost:11434')
+                              setModelCodingApiBase('http://localhost:11434')
                             } else {
                               setPlanningModel('')
                               setCodingModel('')
-                              setModelApiBase('https://api.anthropic.com')
+                              setModelLitellmApiBase('')
+                              setModelCodingApiBase('')
                             }
                           }}
                           className={`flex-1 px-3 py-2 rounded-lg border text-xs font-medium transition-all ${
@@ -456,38 +464,46 @@ export default function Dashboard() {
                       </p>
                     </div>
 
-                    {/* ANTHROPIC_BASE_URL (for anthropic provider) */}
-                    {(modelProvider === 'anthropic' || modelProvider === 'openai' || modelProvider === 'openrouter') && (
+                    {/* LiteLLM API Base URL (planning/review/default) */}
+                    {(modelProvider === 'anthropic' || modelProvider === 'openai' || modelProvider === 'openrouter' || modelProvider === 'local') && (
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">
-                          ANTHROPIC_BASE_URL
+                          LiteLLM API Base URL
                         </label>
                         <input
-                          value={modelApiBase}
-                          onChange={e => setModelApiBase(e.target.value)}
-                          placeholder="https://api.anthropic.com"
+                          value={modelLitellmApiBase}
+                          onChange={e => setModelLitellmApiBase(e.target.value)}
+                          placeholder={
+                            modelProvider === 'openai'
+                              ? 'https://api.openai.com/v1'
+                              : modelProvider === 'openrouter'
+                                ? 'https://openrouter.ai/api/v1'
+                                : modelProvider === 'local'
+                                  ? 'http://localhost:11434'
+                                  : 'https://api.anthropic.com'
+                          }
                           className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none font-mono"
                         />
                         <p className="text-[10px] text-gray-400 mt-1">
-                          Base URL for Anthropic API (used by Claude Code)
+                          Base URL for default/planning/review LiteLLM calls.
                         </p>
                       </div>
                     )}
 
-                    {/* API Base (for local) */}
-                    {modelProvider === 'local' && (
+                    {/* Claude Code API Base URL (coding) */}
+                    {(modelProvider === 'anthropic' || modelProvider === 'openai' || modelProvider === 'openrouter' || modelProvider === 'local') && (
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">
-                          API Base URL
+                          Claude Code API Base URL
                         </label>
                         <input
-                          value={modelApiBase}
-                          onChange={e => setModelApiBase(e.target.value)}
-                          placeholder="http://localhost:8000/v1"
+                          value={modelCodingApiBase}
+                          onChange={e => setModelCodingApiBase(e.target.value)}
+                          placeholder={modelProvider === 'local' ? 'http://localhost:11434' : 'https://api.anthropic.com'}
                           className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none font-mono"
                         />
                         <p className="text-[10px] text-gray-400 mt-1">
-                          URL of your local inference server (vLLM, Ollama, TGI, etc.)
+                          Base URL for coding model calls via Claude Code SDK.
                         </p>
                       </div>
                     )}
@@ -516,7 +532,7 @@ export default function Dashboard() {
                         type="number"
                         min="0"
                         step="0.01"
-                        value="3.00" //value={maxCostUsd}
+                        value={maxCostUsd}
                         onChange={e => {
                           const value = e.target.value
                           setMaxCostUsd(value === '' ? '' : Math.max(0, Number(value)))

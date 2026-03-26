@@ -59,6 +59,8 @@ export interface ModelConfig {
   provider: ModelProvider
   planning_model: string
   coding_model: string
+  litellm_api_base: string | null
+  coding_api_base: string | null
   api_base: string | null
   api_key: string | null
 }

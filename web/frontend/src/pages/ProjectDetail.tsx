@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { fetchProject, stopProject, resumeProject, generatePaper, getPaperPdfUrl, confirmDiscovery, subscribeToEvents } from '../api'
+import { fetchProject, stopProject, resumeProject, updateProjectCostLimit, generatePaper, getPaperPdfUrl, confirmDiscovery, subscribeToEvents } from '../api'
 import type { Project, ProjectEvent } from '../types'
 import StatusBadge from '../components/StatusBadge'
 import StageProgress from '../components/StageProgress'
@@ -47,6 +47,8 @@ export default function ProjectDetail() {
   const [stopping, setStopping] = useState(false)
   const [resuming, setResuming] = useState(false)
   const [generatingPaper, setGeneratingPaper] = useState(false)
+  const [updatingCostLimit, setUpdatingCostLimit] = useState(false)
+  const [costLimitInput, setCostLimitInput] = useState<string>('')
   const [paperContent, setPaperContent] = useState<string | null>(null)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
 
@@ -65,6 +67,7 @@ export default function ProjectDetail() {
       if (hasPdf && !pdfUrl) {
         setPdfUrl(getPaperPdfUrl(id))
       }
+      setCostLimitInput(typeof data.max_cost_usd === 'number' && data.max_cost_usd > 0 ? String(data.max_cost_usd) : '')
     } catch (e) {
       console.error('Failed to load project:', e)
     } finally {
@@ -213,6 +216,27 @@ export default function ProjectDetail() {
     }
   }
 
+  const handleUpdateCostLimit = async () => {
+    if (!id || !project) return
+    setUpdatingCostLimit(true)
+    try {
+      const parsed = costLimitInput.trim() === '' ? undefined : Math.max(0, Number(costLimitInput))
+      const updated = await updateProjectCostLimit(id, parsed)
+      setProject(prev => prev ? {
+        ...prev,
+        status: (updated.status as typeof prev.status),
+        max_cost_usd: updated.max_cost_usd,
+        total_cost_usd: updated.total_cost_usd,
+      } : prev)
+      await loadProject()
+    } catch (e) {
+      console.error('Failed to update cost limit:', e)
+      alert('Failed to update cost limit. Please try again.')
+    } finally {
+      setUpdatingCostLimit(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -304,6 +328,24 @@ export default function ProjectDetail() {
                   </div>
                 )}
                 <div className="text-[11px] text-emerald-700 mt-1">{project.llm_calls} LLM call{project.llm_calls === 1 ? '' : 's'}</div>
+                <div className="mt-2 flex items-center gap-1 justify-end">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={costLimitInput}
+                    onChange={(e) => setCostLimitInput(e.target.value)}
+                    placeholder="Set limit"
+                    className="w-24 px-2 py-1 text-[11px] rounded-md border border-emerald-200 bg-white text-right text-emerald-900 outline-none"
+                  />
+                  <button
+                    onClick={handleUpdateCostLimit}
+                    disabled={updatingCostLimit}
+                    className="px-2 py-1 text-[11px] rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    {updatingCostLimit ? '...' : 'Save'}
+                  </button>
+                </div>
               </div>
 
               <div className="flex items-center gap-2">
@@ -441,10 +483,16 @@ export default function ProjectDetail() {
                         </span>
                       </div>
                     )}
-                    {project.llm_config.api_base && (
+                    {(project.llm_config.litellm_api_base || project.llm_config.api_base) && (
                       <div className="flex items-center justify-between">
-                        <span className="text-gray-500">API Base</span>
-                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.api_base}</span>
+                        <span className="text-gray-500">LiteLLM Base</span>
+                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.litellm_api_base || project.llm_config.api_base}</span>
+                      </div>
+                    )}
+                    {project.llm_config.coding_api_base && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-500">Coding Base</span>
+                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.coding_api_base}</span>
                       </div>
                     )}
                   </div>

@@ -524,10 +524,11 @@ Requirements:
             env["ANTHROPIC_MODEL"] = str(self.model)
 
             # Set Anthropic base URL override if provided in model config
-            if self._model_config.get("api_base"):
-                logger.info(f"[Claude Code] Setting ANTHROPIC_BASE_URL for SDK: {self._model_config['api_base']}")
-                env["ANTHROPIC_BASE_URL"] = self._model_config["api_base"]
-                env["ANTHROPIC_API_BASE"] = self._model_config["api_base"]
+            coding_api_base = self._model_config.get("coding_api_base") or self._model_config.get("api_base")
+            if coding_api_base:
+                logger.info(f"[Claude Code] Setting ANTHROPIC_BASE_URL for SDK: {coding_api_base}")
+                env["ANTHROPIC_BASE_URL"] = coding_api_base
+                env["ANTHROPIC_API_BASE"] = coding_api_base
                 if self._provider == "local":
                     env["ANTHROPIC_AUTH_TOKEN"] = "ollama"
 

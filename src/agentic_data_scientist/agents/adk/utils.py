@@ -452,13 +452,14 @@ def create_litellm_model_from_config(model_config: dict, role: str = "planning",
         return create_litellm_model(DEFAULT_MODEL_NAME, num_retries, timeout)
 
     provider = model_config.get("provider", LLM_PROVIDER)
+    litellm_api_base = model_config.get("litellm_api_base") or model_config.get("api_base")
     model_name = resolve_model_name(model_config, role=role)
-    _log_litellm_target(provider, model_name, model_config.get("api_base"), role=role)
+    _log_litellm_target(provider, model_name, litellm_api_base, role=role)
 
     return create_litellm_model(
         model_name, num_retries, timeout,
         provider_override=provider,
-        api_base_override=model_config.get("api_base"),
+        api_base_override=litellm_api_base,
         api_key_override=model_config.get("api_key"),
     )
 

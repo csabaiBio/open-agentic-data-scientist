@@ -7,6 +7,7 @@ of normal text output and does not have access to any tools.
 """
 
 import logging
+from typing import Any, Optional
 
 from google.adk.agents.callback_context import CallbackContext
 from google.adk.planners import BuiltInPlanner
@@ -148,6 +149,8 @@ REVIEW_CONFIRMATION_OUTPUT_SCHEMA = ReviewConfirmationOutput
 def create_review_confirmation_agent(
     auto_exit_on_completion: bool = False,
     prompt_name: str = "plan_review_confirmation",
+    model_override: Optional[Any] = None,
+    provider_override: Optional[str] = None,
 ) -> LoopDetectionAgent:
     """
     Create a review confirmation agent with structured output.
@@ -209,9 +212,11 @@ def create_review_confirmation_agent(
     before_callback = _create_clear_decision_callback(state_key)
     after_callback = _create_exit_loop_callback(state_key) if auto_exit_on_completion else None
 
+    review_confirmation_model = model_override or REVIEW_MODEL
+
     agent = LoopDetectionAgent(
         name=f"{prompt_name}_agent",
-        model=REVIEW_MODEL,
+        model=review_confirmation_model,
         description="Determines whether to exit the review loop based on implementation status.",
         instruction=instruction,
         tools=[],  # No tools - structured output only
@@ -221,7 +226,7 @@ def create_review_confirmation_agent(
                 thinking_budget=-1,
             ),
         ),
-        generate_content_config=get_generate_content_config(temperature=0.0),
+        generate_content_config=get_generate_content_config(temperature=0.0, provider_override=provider_override),
         output_schema=REVIEW_CONFIRMATION_OUTPUT_SCHEMA,  # Use output_schema for structured JSON
         output_key=state_key,  # Use unique state key per agent instance
         before_agent_callback=before_callback,  # Clear stale decisions before agent runs

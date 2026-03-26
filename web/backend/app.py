@@ -20,7 +20,7 @@ for lib_name in ["LiteLLM", "litellm", "httpx", "httpcore", "openai", "anthropic
     logging.getLogger(lib_name).setLevel(logging.WARNING)
 os.environ["LITELLM_LOG"] = "ERROR"
 
-from .models import ModelConfig, PaperRequest, PaperResponse, ProjectCreate, ProjectMode, ProjectStatus
+from .models import CostLimitUpdateRequest, ModelConfig, PaperRequest, PaperResponse, ProjectCreate, ProjectMode, ProjectStatus
 from .project_manager import ProjectManager
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,8 @@ async def create_project(
     model_provider: str = Form(""),
     planning_model: str = Form(""),
     coding_model: str = Form(""),
+    model_litellm_api_base: str = Form(""),
+    model_coding_api_base: str = Form(""),
     model_api_base: str = Form(""),
     model_api_key: str = Form(""),
     base_project_id: str = Form(""),
@@ -79,10 +81,14 @@ async def create_project(
     # Build model config if provider was specified
     mc = None
     if model_provider:
+        litellm_api_base = model_litellm_api_base or model_api_base
+        coding_api_base = model_coding_api_base or model_api_base
         mc = ModelConfig(
             provider=model_provider,
             planning_model=planning_model or "",
             coding_model=coding_model or "",
+            litellm_api_base=litellm_api_base or None,
+            coding_api_base=coding_api_base or None,
             api_base=model_api_base or None,
             api_key=model_api_key or None,
         )
@@ -133,6 +139,18 @@ async def resume_project(project_id: str):
     if not ok:
         raise HTTPException(400, f"Project cannot be resumed (status={project.status.value})")
     return {"status": "running"}
+
+
+@app.patch("/api/projects/{project_id}/cost-limit")
+async def update_cost_limit(project_id: str, req: CostLimitUpdateRequest):
+    project = manager.update_cost_limit(project_id, req.max_cost_usd)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    return {
+        "status": project.status.value,
+        "max_cost_usd": project.max_cost_usd,
+        "total_cost_usd": project.total_cost_usd,
+    }
 
 
 @app.delete("/api/projects/{project_id}")

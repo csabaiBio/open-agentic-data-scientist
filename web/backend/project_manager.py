@@ -310,6 +310,21 @@ class ProjectManager:
             return True
         return False
 
+    def update_cost_limit(self, project_id: str, max_cost_usd: Optional[float]) -> Optional[Project]:
+        """Update project max cost limit; stop immediately if limit is already exceeded."""
+        project = self._projects.get(project_id)
+        if not project:
+            return None
+
+        project.max_cost_usd = max_cost_usd if (max_cost_usd is not None and max_cost_usd > 0) else None
+        self._save_project(project)
+
+        # Enforce immediately for active runs.
+        if project.status == ProjectStatus.RUNNING and self._is_cost_limit_reached(project):
+            self._stop_for_cost_limit(project_id, project)
+
+        return project
+
     async def resume_project(self, project_id: str) -> bool:
         """Resume a stopped or failed project, re-running the analysis from scratch
         but keeping all previously generated files in the working directory."""
@@ -646,9 +661,10 @@ class ProjectManager:
         if project.llm_config:
             mc = project.llm_config.model_dump(exclude_none=True)
             # Propagate custom Claude endpoint to both supported env var names.
-            if project.llm_config.api_base:
-                os.environ["ANTHROPIC_BASE_URL"] = project.llm_config.api_base
-                os.environ["ANTHROPIC_API_BASE"] = project.llm_config.api_base
+            coding_api_base = project.llm_config.coding_api_base or project.llm_config.api_base
+            if coding_api_base:
+                os.environ["ANTHROPIC_BASE_URL"] = coding_api_base
+                os.environ["ANTHROPIC_API_BASE"] = coding_api_base
 
                 # Local Anthropic-compatible servers (e.g., Ollama) need this token.
                 if project.llm_config.provider == "local":
