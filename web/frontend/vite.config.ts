@@ -23,7 +23,7 @@ export default defineConfig(({ mode }) => {
     server: {
       host: frontendHost,
       port: frontendPort,
-      allowedHosts: ['*'],
+      allowedHosts: [env.VITE_HOST_NAME || 'localhost'],
       proxy: {
         [apiPrefix]: {
           target: `http://127.0.0.1:${backendPort}`,
