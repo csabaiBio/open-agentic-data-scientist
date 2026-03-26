@@ -523,6 +523,14 @@ Requirements:
             env = os.environ.copy()
             env["ANTHROPIC_MODEL"] = str(self.model)
 
+            # Set Anthropic base URL override if provided in model config
+            if self._model_config.get("api_base"):
+                logger.info(f"[Claude Code] Setting ANTHROPIC_BASE_URL for SDK: {self._model_config['api_base']}")
+                env["ANTHROPIC_BASE_URL"] = self._model_config["api_base"]
+                env["ANTHROPIC_API_BASE"] = self._model_config["api_base"]
+                if self._provider == "local":
+                    env["ANTHROPIC_AUTH_TOKEN"] = "ollama"
+
             # Ensure PATH includes common locations for the claude binary
             # This is critical when running from server processes (e.g. uvicorn)
             # where the PATH may not include user-local bin directories

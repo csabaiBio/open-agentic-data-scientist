@@ -325,8 +325,8 @@ export default function Dashboard() {
                     <label className="block text-xs font-medium text-gray-500 mb-2">Provider</label>
                     <div className="flex gap-2 flex-wrap">
                       {[
-                        { id: '', label: 'Default (env)', icon: Cpu, desc: 'From .env config' },
-                        { id: 'bedrock', label: 'Bedrock', icon: Cpu, desc: 'AWS Bedrock' },
+                        // { id: '', label: 'Default (env)', icon: Cpu, desc: 'From .env config' },
+                        // { id: 'bedrock', label: 'Bedrock', icon: Cpu, desc: 'AWS Bedrock' },
                         { id: 'openai', label: 'OpenAI', icon: Cpu, desc: 'OpenAI API' },
                         { id: 'anthropic', label: 'Anthropic', icon: Cpu, desc: 'Anthropic API' },
                         { id: 'openrouter', label: 'OpenRouter', icon: Globe, desc: 'OpenRouter API' },
@@ -342,25 +342,25 @@ export default function Dashboard() {
                               setCodingModel('us.anthropic.claude-sonnet-4-5-20250929-v1:0')
                               setModelApiBase('')
                             } else if (p.id === 'openai') {
-                              setPlanningModel('openai/gpt-4.1-mini')
-                              setCodingModel('gpt-4.1-mini')
-                              setModelApiBase('')
+                              setPlanningModel('gpt-4.1-mini')
+                              setCodingModel('claude-sonnet-4-5-20250929')
+                              setModelApiBase('https://api.anthropic.com')
                             } else if (p.id === 'anthropic') {
                               setPlanningModel('claude-sonnet-4-5')
-                              setCodingModel('claude-sonnet-4-5')
-                              setModelApiBase('')
-                            } else if (p.id === 'openrouter') {
-                              setPlanningModel('anthropic/claude-sonnet-4')
                               setCodingModel('claude-sonnet-4-5-20250929')
-                              setModelApiBase('')
+                              setModelApiBase('https://api.anthropic.com')
+                            } else if (p.id === 'openrouter') {
+                              setPlanningModel('anthropic/claude-sonnet-4-5')
+                              setCodingModel('claude-sonnet-4-5-20250929')
+                              setModelApiBase('https://api.anthropic.com')
                             } else if (p.id === 'local') {
-                              setPlanningModel('qwen3.5:14b')
-                              setCodingModel('qwen3.5:14b')
+                              setPlanningModel('qwen3.5:27b')
+                              setCodingModel('qwen3-coder:30b')
                               setModelApiBase('http://localhost:11434')
                             } else {
                               setPlanningModel('')
                               setCodingModel('')
-                              setModelApiBase('')
+                              setModelApiBase('https://api.anthropic.com')
                             }
                           }}
                           className={`flex-1 px-3 py-2 rounded-lg border text-xs font-medium transition-all ${
@@ -386,19 +386,19 @@ export default function Dashboard() {
                       <input
                         value={planningModel}
                         onChange={e => setPlanningModel(e.target.value)}
-                        placeholder={modelProvider === 'local' ? 'ollama/qwen3.5:27b' : 'Leave empty for env default'}
+                        placeholder={modelProvider === 'local' ? 'qwen3.5:27b' : 'Leave empty for env default'}
                         className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
                       />
                       {modelProvider === 'local' && (
                         <div className="flex flex-wrap gap-1 mt-1.5">
                           {[
-                            'ollama/qwen3.5:27b',
-                            'ollama/qwen3-coder:30b',
-                            'ollama/glm-4.7-flash',
-                            'ollama/granite4',
-                            'ollama/qwen2.5-coder:32b',
-                            'ollama/deepseek-r1:14b',
-                            'ollama/llama4-maverick:17b',
+                            'qwen3.5:27b',
+                            'qwen3-coder:30b',
+                            'glm-4.7-flash',
+                            'granite4',
+                            'qwen2.5-coder:32b',
+                            'deepseek-r1:14b',
+                            'llama4-maverick:17b',
                           ].map(m => (
                             <button
                               key={m}
@@ -425,9 +425,10 @@ export default function Dashboard() {
                         placeholder="Leave empty for env default"
                         className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
                       />
-                      {modelProvider === 'local' && (
+                      { (
                         <div className="flex flex-wrap gap-1 mt-1.5">
                           {[
+                            'claude-sonnet-4-5-20250929',
                             'qwen3.5:27b',
                             'qwen3-coder:30b',
                             'qwen4:27b',
@@ -452,6 +453,24 @@ export default function Dashboard() {
                         Coding uses Claude Code CLI (requires Anthropic or Bedrock credentials)
                       </p>
                     </div>
+
+                    {/* ANTHROPIC_BASE_URL (for anthropic provider) */}
+                    {(modelProvider === 'anthropic' || modelProvider === 'openai' || modelProvider === 'openrouter') && (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">
+                          ANTHROPIC_BASE_URL
+                        </label>
+                        <input
+                          value={modelApiBase}
+                          onChange={e => setModelApiBase(e.target.value)}
+                          placeholder="https://api.anthropic.com"
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none font-mono"
+                        />
+                        <p className="text-[10px] text-gray-400 mt-1">
+                          Base URL for Anthropic API (used by Claude Code)
+                        </p>
+                      </div>
+                    )}
 
                     {/* API Base (for local) */}
                     {modelProvider === 'local' && (

@@ -606,6 +606,14 @@ class ProjectManager:
         mc = None
         if project.llm_config:
             mc = project.llm_config.model_dump(exclude_none=True)
+            # Propagate custom Claude endpoint to both supported env var names.
+            if project.llm_config.api_base:
+                os.environ["ANTHROPIC_BASE_URL"] = project.llm_config.api_base
+                os.environ["ANTHROPIC_API_BASE"] = project.llm_config.api_base
+
+                # Local Anthropic-compatible servers (e.g., Ollama) need this token.
+                if project.llm_config.provider == "local":
+                    os.environ["ANTHROPIC_AUTH_TOKEN"] = "ollama"
 
         core = DataScientist(
             agent_type=agent_type,
@@ -713,6 +721,17 @@ class ProjectManager:
 
             elif event_type == "error":
                 project.error = event_dict.get("content", "Unknown error")
+                error_text = (project.error or "").lower()
+                # Treat LiteLLM routing/not-found failures as terminal errors.
+                if (
+                    "litellm.notfounderror" in error_text
+                    or "notfounderror" in error_text
+                    or ("error code: 404" in error_text and "litellm" in error_text)
+                    or "litellm retried" in error_text
+                ):
+                    project.status = ProjectStatus.FAILED
+                    self._save_project(project)
+                    break
 
             if event_number % 20 == 0:
                 self._scan_files(project)
@@ -731,7 +750,14 @@ class ProjectManager:
                         pass
 
         if project.status == ProjectStatus.RUNNING:
-            project.status = ProjectStatus.COMPLETED
+            if project.error:
+                error_text = project.error.lower()
+                if "stopped" in error_text or "cancelled" in error_text or "canceled" in error_text:
+                    project.status = ProjectStatus.STOPPED
+                else:
+                    project.status = ProjectStatus.FAILED
+            else:
+                project.status = ProjectStatus.COMPLETED
             project.completed_at = _now()
             if project.started_at:
                 started = datetime.fromisoformat(project.started_at)

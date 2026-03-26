@@ -19,6 +19,48 @@ load_dotenv(override=True)
 
 logger = logging.getLogger(__name__)
 
+_LITELLM_DEBUG_ENABLED = False
+
+
+def _is_truthy(value: Optional[str]) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _maybe_enable_litellm_debug() -> None:
+    """Enable LiteLLM internal debug logging when explicitly requested."""
+    global _LITELLM_DEBUG_ENABLED
+    if _LITELLM_DEBUG_ENABLED:
+        return
+
+    if not (_is_truthy(os.getenv("LITELLM_DEBUG")) or _is_truthy(os.getenv("AGENTICDS_LITELLM_DEBUG"))):
+        return
+
+    try:
+        import litellm
+
+        # Compatibility across LiteLLM versions.
+        if hasattr(litellm, "_turn_on_debug"):
+            litellm._turn_on_debug()
+            _LITELLM_DEBUG_ENABLED = True
+            logger.info("[LiteLLM] Internal debug logging enabled via _turn_on_debug()")
+            return
+
+        if hasattr(litellm, "turn_on_debug"):
+            litellm.turn_on_debug()
+            _LITELLM_DEBUG_ENABLED = True
+            logger.info("[LiteLLM] Internal debug logging enabled via turn_on_debug()")
+            return
+
+        if hasattr(litellm, "set_verbose"):
+            litellm.set_verbose = True
+            _LITELLM_DEBUG_ENABLED = True
+            logger.info("[LiteLLM] Internal debug logging enabled via set_verbose=True")
+            return
+
+        logger.warning("[LiteLLM] No known debug toggle found in installed litellm version")
+    except Exception as e:
+        logger.warning("[LiteLLM] Failed to enable debug logging: %s", e)
+
 # Configure LLM provider
 # Supported providers: "bedrock", "openrouter", "openai", "anthropic", "local"
 # Auto-detected from available API keys if LLM_PROVIDER is not set.
@@ -141,6 +183,7 @@ elif LLM_PROVIDER == "anthropic":
 else:
     logger.warning(f"[AgenticDS] Unknown LLM_PROVIDER '{LLM_PROVIDER}' - no provider-specific setup")
 
+_maybe_enable_litellm_debug()
 
 def _normalize_model_name(provider: str, model_name: str) -> str:
     """Normalize model names for provider-specific LiteLLM routing."""
@@ -155,8 +198,8 @@ def _normalize_model_name(provider: str, model_name: str) -> str:
     if provider == "openrouter" and model_name.startswith("openrouter/"):
         return model_name[len("openrouter/"):]
     if provider == "local" and not model_name.startswith(("openai/", "ollama/", "huggingface/")):
-        # return model_name
-        return f"ollama/{model_name}"
+        return model_name
+        # return f"ollama/{model_name}"
     return model_name
 
 
@@ -232,6 +275,61 @@ def calculate_llm_cost(
         return 0.0
 
 
+def _resolve_provider_defaults(provider: str) -> tuple[Optional[str], Optional[str]]:
+    """Resolve provider API base/key from the latest environment values."""
+    provider = (provider or "").lower()
+    if provider == "openrouter":
+        return (
+            os.getenv("OPENROUTER_API_BASE", OPENROUTER_API_BASE),
+            os.getenv("OPENROUTER_API_KEY", OPENROUTER_API_KEY),
+        )
+    if provider == "openai":
+        return (
+            os.getenv("OPENAI_API_BASE", OPENAI_API_BASE),
+            os.getenv("OPENAI_API_KEY", OPENAI_API_KEY),
+        )
+    if provider == "anthropic":
+        return (
+            os.getenv("ANTHROPIC_API_BASE")
+            or os.getenv("ANTHROPIC_BASE_URL")
+            or ANTHROPIC_API_BASE,
+            os.getenv("ANTHROPIC_API_KEY", ANTHROPIC_API_KEY),
+        )
+    if provider == "local":
+        return (
+            os.getenv("OPENAI_API_BASE")
+            or os.getenv("ANTHROPIC_API_BASE")
+            or os.getenv("ANTHROPIC_BASE_URL"),
+            os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY"),
+        )
+    return (None, None)
+
+
+def _infer_litellm_path(provider: str, model_name: str) -> str:
+    """Best-effort path hint for logging outgoing LiteLLM requests."""
+    provider = (provider or "").lower()
+    if provider in {"openai", "openrouter", "local"}:
+        return "/chat/completions"
+    if provider == "anthropic":
+        return "/v1/messages"
+    if provider == "bedrock":
+        return f"/model/{model_name}/converse (AWS Bedrock runtime)"
+    return "provider-specific (resolved by LiteLLM)"
+
+
+def _log_litellm_target(provider: str, model_name: str, api_base: Optional[str], role: Optional[str] = None) -> None:
+    """Emit detailed target information for LiteLLM routing."""
+    path_hint = _infer_litellm_path(provider, model_name)
+    logger.info(
+        "[LiteLLM] target provider=%s role=%s model=%s api_base=%s path_hint=%s",
+        provider,
+        role or "n/a",
+        model_name,
+        api_base or "<provider-default>",
+        path_hint,
+    )
+
+
 def create_litellm_model(model_name: str, num_retries: int = 10, timeout: int = 300,
                          provider_override: Optional[str] = None, api_base_override: Optional[str] = None,
                          api_key_override: Optional[str] = None) -> LiteLlm:
@@ -260,6 +358,11 @@ def create_litellm_model(model_name: str, num_retries: int = 10, timeout: int = 
     """
     provider = (provider_override or LLM_PROVIDER).lower()
     model_name = _normalize_model_name(provider, model_name)
+    default_api_base, default_api_key = _resolve_provider_defaults(provider)
+    effective_api_base = api_base_override or default_api_base
+    effective_api_key = api_key_override or default_api_key
+
+    _log_litellm_target(provider, model_name, effective_api_base)
 
     if provider == "local":
         # Local provider: vLLM, Ollama, TGI, or any OpenAI-compatible server
@@ -268,10 +371,10 @@ def create_litellm_model(model_name: str, num_retries: int = 10, timeout: int = 
             "num_retries": num_retries,
             "timeout": timeout,
         }
-        if api_base_override:
-            kwargs["api_base"] = api_base_override
-        if api_key_override:
-            kwargs["api_key"] = api_key_override
+        if effective_api_base:
+            kwargs["api_base"] = effective_api_base
+        if effective_api_key:
+            kwargs["api_key"] = effective_api_key
         else:
             # Local servers often don't need a key; set a dummy to avoid LiteLLM errors
             kwargs["api_key"] = "not-needed"
@@ -283,12 +386,13 @@ def create_litellm_model(model_name: str, num_retries: int = 10, timeout: int = 
             timeout=timeout,
         )
     elif provider == "openrouter":
+        print(f"Creating LiteLlm for OpenRouter with model={model_name} api_base={effective_api_base}")
         return LiteLlm(
             model=model_name,
             num_retries=num_retries,
             timeout=timeout,
-            api_base=api_base_override or OPENROUTER_API_BASE,
-            api_key=api_key_override or OPENROUTER_API_KEY,
+            api_base=effective_api_base or OPENROUTER_API_BASE,
+            api_key=effective_api_key or OPENROUTER_API_KEY,
             custom_llm_provider="openrouter",
         )
     elif provider == "openai":
@@ -297,10 +401,11 @@ def create_litellm_model(model_name: str, num_retries: int = 10, timeout: int = 
             "num_retries": num_retries,
             "timeout": timeout,
         }
-        if api_base_override or OPENAI_API_BASE:
-            kwargs["api_base"] = api_base_override or OPENAI_API_BASE
-        if api_key_override or OPENAI_API_KEY:
-            kwargs["api_key"] = api_key_override or OPENAI_API_KEY
+        if effective_api_base:
+            kwargs["api_base"] = effective_api_base
+        if effective_api_key:
+            kwargs["api_key"] = effective_api_key
+        print(kwargs)
         return LiteLlm(**kwargs)
     elif provider == "anthropic":
         kwargs = {
@@ -308,10 +413,11 @@ def create_litellm_model(model_name: str, num_retries: int = 10, timeout: int = 
             "num_retries": num_retries,
             "timeout": timeout,
         }
-        if api_base_override or ANTHROPIC_API_BASE:
-            kwargs["api_base"] = api_base_override or ANTHROPIC_API_BASE
-        if api_key_override or ANTHROPIC_API_KEY:
-            kwargs["api_key"] = api_key_override or ANTHROPIC_API_KEY
+        if effective_api_base:
+            kwargs["api_base"] = effective_api_base
+        if effective_api_key:
+            kwargs["api_key"] = effective_api_key
+        print(kwargs)
         return LiteLlm(**kwargs)
     else:
         return LiteLlm(
@@ -347,6 +453,7 @@ def create_litellm_model_from_config(model_config: dict, role: str = "planning",
 
     provider = model_config.get("provider", LLM_PROVIDER)
     model_name = resolve_model_name(model_config, role=role)
+    _log_litellm_target(provider, model_name, model_config.get("api_base"), role=role)
 
     return create_litellm_model(
         model_name, num_retries, timeout,
