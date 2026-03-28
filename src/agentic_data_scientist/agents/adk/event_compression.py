@@ -156,9 +156,16 @@ Be detailed and specific - this summary replaces the original events, so preserv
         # Create LiteLlm instance with the model NAME (string, not object!)
         llm = create_litellm_model(model_name, num_retries=3, timeout=30)
 
+        # Keep request model aligned with provider-specific LiteLLM routing.
+        request_model_name = str(model_name or "")
+        if request_model_name.startswith("local/"):
+            request_model_name = request_model_name[len("local/"):]
+        while request_model_name.startswith("openrouter/"):
+            request_model_name = request_model_name[len("openrouter/"):]
+
         # Create LlmRequest with proper structure
         llm_request = LlmRequest(
-            model=model_name,
+            model=request_model_name,
             contents=[genai_types.Content(role="user", parts=[genai_types.Part(text=prompt)])],
             config=genai_types.GenerateContentConfig(
                 temperature=0.3, max_output_tokens=4000

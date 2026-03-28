@@ -5,6 +5,8 @@ This module provides the main DataScientist class for running agents
 with optional conversation context and file handling.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import uuid
@@ -14,9 +16,6 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional, Union
 
 from dotenv import load_dotenv
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
-from google.genai import types
 
 from agentic_data_scientist.agents.adk.utils import (
     CODING_MODEL_NAME,
@@ -211,6 +210,9 @@ class DataScientist:
         else:
             raise ValueError(f"Unknown agent type: {self.config.agent_type}")
 
+        from google.adk.runners import Runner
+        from google.adk.sessions import InMemorySessionService
+
         # Create session service
         self.session_service = InMemorySessionService()
 
@@ -393,6 +395,8 @@ class DataScientist:
 
     async def _stream_responses(self, prompt: str, start_time: datetime) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream responses from the agent."""
+        from google.genai import types
+
         event_count = 0
         message_event_number = 0
         responses = []
@@ -539,6 +543,8 @@ class DataScientist:
 
     async def _collect_responses(self, prompt: str, start_time: datetime) -> Result:
         """Collect all responses and return a complete result."""
+        from google.genai import types
+
         responses = []
         event_count = 0
 

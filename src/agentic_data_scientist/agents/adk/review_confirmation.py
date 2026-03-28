@@ -15,7 +15,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 
 from agentic_data_scientist.agents.adk.loop_detection import LoopDetectionAgent
-from agentic_data_scientist.agents.adk.utils import REVIEW_MODEL, get_generate_content_config
+from agentic_data_scientist.agents.adk.utils import get_generate_content_config, get_review_model
 from agentic_data_scientist.prompts import load_prompt
 
 
@@ -212,7 +212,7 @@ def create_review_confirmation_agent(
     before_callback = _create_clear_decision_callback(state_key)
     after_callback = _create_exit_loop_callback(state_key) if auto_exit_on_completion else None
 
-    review_confirmation_model = model_override or REVIEW_MODEL
+    review_confirmation_model = model_override or get_review_model()
 
     agent = LoopDetectionAgent(
         name=f"{prompt_name}_agent",

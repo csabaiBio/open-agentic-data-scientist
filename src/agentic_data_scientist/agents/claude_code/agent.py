@@ -27,6 +27,7 @@ from agentic_data_scientist.agents.adk.utils import (
     AWS_BEDROCK_API_KEY,
     AWS_REGION_NAME,
     resolve_model_name,
+    resolve_provider_for_role,
 )
 from agentic_data_scientist.agents.claude_code.templates import (
     get_claude_context,
@@ -81,6 +82,24 @@ def _normalize_model_for_claude_sdk(model: str, provider: str) -> str:
         normalized = normalized.split("/", 1)[1]
 
     return normalized
+
+
+def _infer_provider_from_model_name(model_name: str) -> str:
+    """Infer provider from model prefix for Claude Code routing."""
+    model = (model_name or "").strip().lower()
+    if not model:
+        return ""
+    if model.startswith("openai/"):
+        return "openai"
+    if model.startswith("anthropic/"):
+        return "anthropic"
+    if model.startswith("bedrock/"):
+        return "bedrock"
+    if model.startswith("openrouter/"):
+        return "openrouter"
+    if model.startswith(("local/", "ollama/", "huggingface/")):
+        return "local"
+    return ""
 
 
 def _augment_local_execution_prompt(prompt: str, attempt: int) -> str:
@@ -315,7 +334,17 @@ class ClaudeCodeAgent(Agent):
         Bedrock requires a Bedrock-specific model ID; other providers use standard model names.
         """
         self._model_config = model_config or {}
-        self._provider = (self._model_config.get("provider") or LLM_PROVIDER).lower()
+        self._provider = resolve_provider_for_role(self._model_config, role="coding")
+
+        raw_coding_model = str(self._model_config.get("coding_model") or "").strip()
+        selected_coding_base_source = (self._model_config.get("coding_api_base_source") or "").strip().lower()
+
+        if not self._provider and selected_coding_base_source in {"openai", "anthropic", "local"}:
+            self._provider = selected_coding_base_source
+        if not self._provider:
+            self._provider = _infer_provider_from_model_name(raw_coding_model)
+        if not self._provider:
+            self._provider = (self._model_config.get("provider") or LLM_PROVIDER or "openai").strip().lower()
 
         # Resolve coding model from per-project config first, then provider defaults, then env.
         model = resolve_model_name(self._model_config, role="coding")
@@ -523,14 +552,54 @@ Requirements:
             env = os.environ.copy()
             env["ANTHROPIC_MODEL"] = str(self.model)
 
-            # Set Anthropic base URL override if provided in model config
-            coding_api_base = self._model_config.get("coding_api_base") or self._model_config.get("api_base")
+            # Set Anthropic base URL override if provided in model config.
+            selected_coding_base_source = (self._model_config.get("coding_api_base_source") or "").strip().lower()
+            if selected_coding_base_source == "openai":
+                coding_api_base = self._model_config.get("openai_api_base")
+            elif selected_coding_base_source == "anthropic":
+                coding_api_base = self._model_config.get("anthropic_api_base")
+            elif selected_coding_base_source == "local":
+                coding_api_base = (
+                    self._model_config.get("local_api_base")
+                    or os.getenv("LOCAL_API_BASE")
+                    or os.getenv("OLLAMA_API_BASE")
+                    or os.getenv("OLLAMA_BASE_URL")
+                    or os.getenv("LOCAL_LLM_API_BASE")
+                    or "http://localhost:11434"
+                )
+            elif self._provider == "openai":
+                coding_api_base = self._model_config.get("openai_api_base") or self._model_config.get("coding_api_base")
+            elif self._provider == "anthropic":
+                coding_api_base = self._model_config.get("anthropic_api_base") or self._model_config.get("coding_api_base")
+            elif self._provider == "local":
+                coding_api_base = (
+                    self._model_config.get("local_api_base")
+                    or self._model_config.get("coding_api_base")
+                    or os.getenv("LOCAL_API_BASE")
+                    or os.getenv("OLLAMA_API_BASE")
+                    or os.getenv("OLLAMA_BASE_URL")
+                    or os.getenv("LOCAL_LLM_API_BASE")
+                    or "http://localhost:11434"
+                )
+            else:
+                coding_api_base = self._model_config.get("coding_api_base")
             if coding_api_base:
                 logger.info(f"[Claude Code] Setting ANTHROPIC_BASE_URL for SDK: {coding_api_base}")
                 env["ANTHROPIC_BASE_URL"] = coding_api_base
                 env["ANTHROPIC_API_BASE"] = coding_api_base
                 if self._provider == "local":
                     env["ANTHROPIC_AUTH_TOKEN"] = "ollama"
+
+            effective_api_base = env.get("ANTHROPIC_BASE_URL") or env.get("ANTHROPIC_API_BASE") or "<default>"
+            print(f"[Claude Code] SDK params model={self.model} api_base={effective_api_base} provider={self._provider}, coding_api_base={coding_api_base}, selected_coding_base_source={selected_coding_base_source}")
+            logger.info(
+                "[Claude Code] SDK params model=%s api_base=%s provider=%s, coding_api_base=%s, selected_coding_base_source=%s",
+                self.model,
+                effective_api_base,
+                self._provider,
+                coding_api_base,
+                selected_coding_base_source,
+            )
 
             # Ensure PATH includes common locations for the claude binary
             # This is critical when running from server processes (e.g. uvicorn)
@@ -559,7 +628,7 @@ Requirements:
                 logger.warning("[Claude Code] Could not find claude binary - SDK will attempt to find it")
 
             # Configure Bedrock for Claude Code if using Bedrock provider
-            bedrock_api_key = self._model_config.get("api_key") or os.getenv("AWS_BEARER_TOKEN_BEDROCK") or os.getenv("AWS_BEDROCK_API_KEY")
+            bedrock_api_key = os.getenv("AWS_BEARER_TOKEN_BEDROCK") or os.getenv("AWS_BEDROCK_API_KEY")
             if self._provider == "bedrock" and bedrock_api_key:
                 env["CLAUDE_CODE_USE_BEDROCK"] = "1"
                 env["AWS_BEARER_TOKEN_BEDROCK"] = bedrock_api_key

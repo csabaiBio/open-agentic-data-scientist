@@ -19,6 +19,7 @@ async def run_discovery(
     query: str,
     num_papers: int = 10,
     days_back: int = 30,
+    model_config: Optional[Dict[str, Any]] = None,
     emit: Optional[Callable] = None,
 ) -> Dict:
     """
@@ -57,15 +58,23 @@ async def run_discovery(
         "analysis_prompt": "",
     }
 
+    planning_model_name: Optional[str] = None
+
     # ── Initialize LLM (needed for search term extraction + synthesis) ──
     try:
         from agentic_data_scientist.agents.adk.utils import (
             DEFAULT_MODEL_NAME,
-            LLM_PROVIDER,
             create_litellm_model,
+            create_litellm_model_from_config,
+            resolve_model_name,
         )
 
-        llm = create_litellm_model(DEFAULT_MODEL_NAME, num_retries=3, timeout=120)
+        if model_config:
+            planning_model_name = resolve_model_name(model_config, role="planning")
+            llm = create_litellm_model_from_config(model_config, role="planning", num_retries=3, timeout=120)
+        else:
+            planning_model_name = DEFAULT_MODEL_NAME
+            llm = create_litellm_model(DEFAULT_MODEL_NAME, num_retries=3, timeout=120)
     except Exception as e:
         _emit("error", f"Failed to initialize LLM: {e}")
         result["synthesis"] = "LLM unavailable."
@@ -77,7 +86,7 @@ async def run_discovery(
     })
 
     # Use LLM to extract multiple broader search queries
-    search_queries = await _extract_search_terms(llm, query, emit=_emit)
+    search_queries = await _extract_search_terms(llm, query, model_name=planning_model_name, emit=_emit)
     _emit("discovery_phase",
           f"Trying {len(search_queries)} search strategies on PubMed...",
           {"phase": "searching", "phase_index": 0})
@@ -149,7 +158,7 @@ Using your own expert knowledge of the biomedical literature:
 
 4. **Why PubMed Returned No Results**: Briefly explain why the specific combination of terms may be too niche or novel for PubMed (e.g., very recent discovery, uncommon combination of gene + phenotype).
 
-**Important**: Clearly state at the top that this synthesis is based on AI knowledge, not on specific retrieved papers. Be scientifically accurate and cite known genes, pathways, and mechanisms by name.""", emit=_emit)
+**Important**: Clearly state at the top that this synthesis is based on AI knowledge, not on specific retrieved papers. Be scientifically accurate and cite known genes, pathways, and mechanisms by name.""", model_name=planning_model_name, emit=_emit)
     else:
         synthesis = await _llm_call(llm, f"""You are a research synthesis expert. Analyze these {len(papers)} recent scientific papers and provide a comprehensive synthesis.
 
@@ -165,7 +174,7 @@ Using your own expert knowledge of the biomedical literature:
 
 4. **Emerging Patterns**: What patterns or trends do you see forming across these papers?
 
-Be specific, cite paper PMIDs when referencing specific findings. Write in clear scientific prose.""", emit=_emit)
+Be specific, cite paper PMIDs when referencing specific findings. Write in clear scientific prose.""", model_name=planning_model_name, emit=_emit)
 
     result["synthesis"] = synthesis
     _emit("discovery_synthesis", synthesis, {"phase": "synthesis_complete", "phase_index": 3})
@@ -211,7 +220,7 @@ Outline 4-6 concrete analytical steps to test the hypothesis, including:
 - Data preprocessing
 - Statistical methods
 - Machine learning approaches if applicable
-- Validation strategy""", emit=_emit)
+- Validation strategy""", model_name=planning_model_name, emit=_emit)
 
     # Parse the response into components
     result["hypothesis"] = hypothesis_response
@@ -240,7 +249,7 @@ Write a single, comprehensive prompt (3-5 paragraphs) that:
 5. Mentions what would constitute a novel, publishable finding
 
 The prompt should be self-contained - an AI data scientist should be able to read it and know exactly what to do.
-Do NOT include any preamble like "Here is the prompt" - just write the research task directly.""", emit=_emit)
+Do NOT include any preamble like "Here is the prompt" - just write the research task directly.""", model_name=planning_model_name, emit=_emit)
 
     result["research_question"] = research_question
     result["analysis_prompt"] = research_question
@@ -256,7 +265,12 @@ Do NOT include any preamble like "Here is the prompt" - just write the research 
     return result
 
 
-async def _extract_search_terms(llm, user_query: str, emit: Optional[Callable] = None) -> List[str]:
+async def _extract_search_terms(
+    llm,
+    user_query: str,
+    model_name: Optional[str] = None,
+    emit: Optional[Callable] = None,
+) -> List[str]:
     """Use the LLM to extract 3-5 PubMed search queries from a natural-language question.
 
     Returns queries ordered from most specific to broadest, each suitable for
@@ -281,7 +295,7 @@ async def _extract_search_terms(llm, user_query: str, emit: Optional[Callable] =
 ## Output format:
 Return ONLY the 4 search queries, one per line, no numbering, no explanation, no quotes.
 """
-    raw = await _llm_call(llm, prompt, emit=emit)
+    raw = await _llm_call(llm, prompt, model_name=model_name, emit=emit)
 
     # Parse: one query per line, filter empties
     queries = [line.strip().strip('"').strip("'").strip('-').strip('1234567890.').strip()

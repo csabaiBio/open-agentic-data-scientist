@@ -71,12 +71,19 @@ class DiscoveryResult(BaseModel):
 class ModelConfig(BaseModel):
     """Model configuration for a project run."""
     provider: str = "openai"  # bedrock, openrouter, openai, anthropic, local
-    planning_model: str = ""  # model ID for planning/review/summary agents (LiteLLM)
+    planning_provider: Optional[str] = None  # explicit provider for planning_model
+    review_provider: Optional[str] = None  # explicit provider for review_model
+    coding_provider: Optional[str] = None  # explicit provider for coding_model
+    planning_model: str = ""  # model ID for planning/summary agents (LiteLLM)
+    review_model: str = ""  # model ID for review/critique agents (LiteLLM)
     coding_model: str = ""  # model ID for coding agent (Claude Code SDK)
+    openai_api_base: Optional[str] = None  # base URL for OpenAI models
+    anthropic_api_base: Optional[str] = None  # base URL for Anthropic models
+    local_api_base: Optional[str] = None  # base URL for local/ollama models
+    planning_api_base_source: Optional[str] = None  # openai | anthropic | local
+    review_api_base_source: Optional[str] = None  # openai | anthropic | local
+    coding_api_base_source: Optional[str] = None  # openai | anthropic | local
     litellm_api_base: Optional[str] = None  # base URL for LiteLLM calls (planning/review/default)
-    coding_api_base: Optional[str] = None  # base URL for Claude Code SDK calls (coding)
-    api_base: Optional[str] = None  # deprecated compatibility field
-    api_key: Optional[str] = None  # optional API key
 
 
 class ProjectCreate(BaseModel):

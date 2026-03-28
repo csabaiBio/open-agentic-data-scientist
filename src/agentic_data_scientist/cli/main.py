@@ -19,7 +19,7 @@ from agentic_data_scientist import DataScientist
 # This prevents libraries like LiteLLM from setting up their own console handlers
 for lib_name in ['LiteLLM', 'litellm', 'httpx', 'httpcore', 'openai', 'anthropic', 'google_adk']:
     lib_logger = logging.getLogger(lib_name)
-    lib_logger.setLevel(logging.WARNING)  # Only warnings and above
+    lib_logger.setLevel(logging.DEBUG)  # Only warnings and above
     lib_logger.propagate = False  # Don't propagate to root logger yet
 
 
@@ -29,8 +29,8 @@ os.environ['LITELLM_LOG'] = 'ERROR'  # Only show errors from LiteLLM
 try:
     import litellm
 
-    litellm.suppress_debug_info = True
-    litellm.drop_params = True
+    litellm.suppress_debug_info = False
+    litellm.drop_params = False
     litellm.turn_off_message_logging = True
 except (ImportError, AttributeError):
     # LiteLLM not installed yet or attributes don't exist, will be configured later
@@ -243,8 +243,8 @@ def main(
         try:
             import litellm
 
-            litellm.suppress_debug_info = True
-            litellm.drop_params = True
+            litellm.suppress_debug_info = False
+            litellm.drop_params = False
             litellm.turn_off_message_logging = True
         except (ImportError, AttributeError):
             pass

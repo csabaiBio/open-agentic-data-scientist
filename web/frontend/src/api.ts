@@ -21,12 +21,19 @@ export interface CreateProjectOpts {
   numPapers?: number
   daysBack?: number
   maxCostUsd?: number
-  modelProvider?: string
   planningModel?: string
+  reviewModel?: string
   codingModel?: string
+  modelOpenaiApiBase?: string
+  modelAnthropicApiBase?: string
+  modelLocalApiBase?: string
+  modelPlanningApiBaseSource?: string
+  modelReviewApiBaseSource?: string
+  modelCodingApiBaseSource?: string
   modelLitellmApiBase?: string
-  modelCodingApiBase?: string
-  modelApiKey?: string
+  modelOpenaiApiKey?: string
+  modelAnthropicApiKey?: string
+  modelLocalApiKey?: string
   baseProjectId?: string
 }
 
@@ -39,12 +46,19 @@ export async function createProject(opts: CreateProjectOpts): Promise<Project> {
   if (typeof opts.maxCostUsd === 'number' && opts.maxCostUsd > 0) {
     form.append('max_cost_usd', String(opts.maxCostUsd))
   }
-  if (opts.modelProvider) form.append('model_provider', opts.modelProvider)
   if (opts.planningModel) form.append('planning_model', opts.planningModel)
+  if (opts.reviewModel) form.append('review_model', opts.reviewModel)
   if (opts.codingModel) form.append('coding_model', opts.codingModel)
+  if (opts.modelOpenaiApiBase) form.append('model_openai_api_base', opts.modelOpenaiApiBase)
+  if (opts.modelAnthropicApiBase) form.append('model_anthropic_api_base', opts.modelAnthropicApiBase)
+  if (opts.modelLocalApiBase) form.append('model_local_api_base', opts.modelLocalApiBase)
+  if (opts.modelPlanningApiBaseSource) form.append('model_planning_api_base_source', opts.modelPlanningApiBaseSource)
+  if (opts.modelReviewApiBaseSource) form.append('model_review_api_base_source', opts.modelReviewApiBaseSource)
+  if (opts.modelCodingApiBaseSource) form.append('model_coding_api_base_source', opts.modelCodingApiBaseSource)
   if (opts.modelLitellmApiBase) form.append('model_litellm_api_base', opts.modelLitellmApiBase)
-  if (opts.modelCodingApiBase) form.append('model_coding_api_base', opts.modelCodingApiBase)
-  if (opts.modelApiKey) form.append('model_api_key', opts.modelApiKey)
+  if (opts.modelOpenaiApiKey) form.append('model_openai_api_key', opts.modelOpenaiApiKey)
+  if (opts.modelAnthropicApiKey) form.append('model_anthropic_api_key', opts.modelAnthropicApiKey)
+  if (opts.modelLocalApiKey) form.append('model_local_api_key', opts.modelLocalApiKey)
   if (opts.baseProjectId) form.append('base_project_id', opts.baseProjectId)
   for (const f of opts.files) {
     form.append('files', f)

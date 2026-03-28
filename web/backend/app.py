@@ -38,6 +38,19 @@ app.add_middleware(
 manager = ProjectManager()
 
 
+def _infer_provider_from_model_name(model_name: str) -> str:
+    model = (model_name or "").strip().lower()
+    if not model:
+        return ""
+    if model.startswith("openai/"):
+        return "openai"
+    if model.startswith("anthropic/"):
+        return "anthropic"
+    if model.startswith("ollama/") or model.startswith("local/"):
+        return "local"
+    return ""
+
+
 # ── Projects CRUD ──────────────────────────────────────────────────
 
 @app.get("/api/projects")
@@ -60,13 +73,16 @@ async def create_project(
     num_papers: int = Form(10),
     days_back: int = Form(30),
     max_cost_usd: float = Form(0.0),
-    model_provider: str = Form(""),
     planning_model: str = Form(""),
+    review_model: str = Form(""),
     coding_model: str = Form(""),
+    model_openai_api_base: str = Form(""),
+    model_anthropic_api_base: str = Form(""),
+    model_local_api_base: str = Form(""),
+    model_planning_api_base_source: str = Form(""),
+    model_review_api_base_source: str = Form(""),
+    model_coding_api_base_source: str = Form(""),
     model_litellm_api_base: str = Form(""),
-    model_coding_api_base: str = Form(""),
-    model_api_base: str = Form(""),
-    model_api_key: str = Form(""),
     base_project_id: str = Form(""),
     files: list[UploadFile] = File(default=[]),
 ):
@@ -78,19 +94,46 @@ async def create_project(
     }
     project_mode = mode_map.get(mode, ProjectMode.ORCHESTRATED)
 
-    # Build model config if provider was specified
+    # Build model config if any model settings were specified
     mc = None
-    if model_provider:
-        litellm_api_base = model_litellm_api_base or model_api_base
-        coding_api_base = model_coding_api_base or model_api_base
+    has_model_overrides = any([
+        planning_model,
+        review_model,
+        coding_model,
+        model_openai_api_base,
+        model_anthropic_api_base,
+        model_local_api_base,
+        model_planning_api_base_source,
+        model_review_api_base_source,
+        model_coding_api_base_source,
+        model_litellm_api_base,
+    ])
+    if has_model_overrides:
+        inferred_provider = (
+            _infer_provider_from_model_name(planning_model)
+            or _infer_provider_from_model_name(review_model)
+            or _infer_provider_from_model_name(coding_model)
+            or "openai"
+        )
+        planning_provider = _infer_provider_from_model_name(planning_model) or inferred_provider
+        review_provider = _infer_provider_from_model_name(review_model) or planning_provider
+        coding_provider = _infer_provider_from_model_name(coding_model) or review_provider
+        litellm_api_base = model_litellm_api_base
         mc = ModelConfig(
-            provider=model_provider,
+            provider=inferred_provider,
+            planning_provider=planning_provider,
+            review_provider=review_provider,
+            coding_provider=coding_provider,
             planning_model=planning_model or "",
+            review_model=review_model or "",
             coding_model=coding_model or "",
+            openai_api_base=model_openai_api_base or None,
+            anthropic_api_base=model_anthropic_api_base or None,
+            local_api_base=model_local_api_base or None,
+            planning_api_base_source=model_planning_api_base_source or None,
+            review_api_base_source=model_review_api_base_source or None,
+            coding_api_base_source=model_coding_api_base_source or None,
             litellm_api_base=litellm_api_base or None,
-            coding_api_base=coding_api_base or None,
-            api_base=model_api_base or None,
-            api_key=model_api_key or None,
         )
 
     req = ProjectCreate(

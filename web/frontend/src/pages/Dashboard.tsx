@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Search, Clock, FileStack, Trash2, Loader2, Upload, X, Sparkles, Compass, Settings2, ChevronDown, ChevronUp, Cpu, Globe, Server, Coins } from 'lucide-react'
+import { Plus, Search, Clock, FileStack, Trash2, Loader2, Upload, X, Sparkles, Compass, Settings2, ChevronDown, ChevronUp, Cpu, Server, Coins } from 'lucide-react'
 import { fetchProjects, createProject, deleteProject } from '../api'
 import type { ProjectSummary, ProjectMode } from '../types'
 import StatusBadge from '../components/StatusBadge'
@@ -33,6 +33,15 @@ function formatUsd(value: number | null | undefined): string {
   }).format(amount)
 }
 
+function inferApiBaseSourceFromModel(modelName: string): '' | 'openai' | 'anthropic' | 'local' {
+  const model = (modelName || '').trim().toLowerCase()
+  if (!model) return ''
+  if (model.startsWith('openai/')) return 'openai'
+  if (model.startsWith('anthropic/')) return 'anthropic'
+  if (model.startsWith('local/') || model.startsWith('ollama/') || model.startsWith('huggingface/')) return 'local'
+  return ''
+}
+
 export default function Dashboard() {
   const navigate = useNavigate()
   const [projects, setProjects] = useState<ProjectSummary[]>([])
@@ -45,14 +54,21 @@ export default function Dashboard() {
   const [numPapers, setNumPapers] = useState(10)
   const [daysBack, setDaysBack] = useState(30)
   const [showModelSettings, setShowModelSettings] = useState(false)
-  const [modelProvider, setModelProvider] = useState<string>('')
   const [planningModel, setPlanningModel] = useState('')
+  const [reviewModel, setReviewModel] = useState('')
   const [codingModel, setCodingModel] = useState('')
-  const [modelLitellmApiBase, setModelLitellmApiBase] = useState('')
-  const [modelCodingApiBase, setModelCodingApiBase] = useState('')
-  const [modelApiKey, setModelApiKey] = useState('')
+  const [modelOpenaiApiBase, setModelOpenaiApiBase] = useState('')
+  const [modelAnthropicApiBase, setModelAnthropicApiBase] = useState('')
+  const [modelLocalApiBase, setModelLocalApiBase] = useState('')
+  const [planningApiBaseSource, setPlanningApiBaseSource] = useState('')
+  const [reviewApiBaseSource, setReviewApiBaseSource] = useState('')
+  const [codingApiBaseSource, setCodingApiBaseSource] = useState('')
+  const [modelOpenaiApiKey, setModelOpenaiApiKey] = useState('')
+  const [modelAnthropicApiKey, setModelAnthropicApiKey] = useState('')
+  const [modelLocalApiKey, setModelLocalApiKey] = useState('')
   const [maxCostUsd, setMaxCostUsd] = useState<number | ''>('')
   const [baseProjectId, setBaseProjectId] = useState<string>('')
+  const [nowMs, setNowMs] = useState(Date.now())
 
   const load = useCallback(async () => {
     try {
@@ -67,7 +83,6 @@ export default function Dashboard() {
 
   useEffect(() => { load() }, [load])
 
-  // Auto-refresh running projects
   useEffect(() => {
     const hasRunning = projects.some(p => p.status === 'running' || p.status === 'pending')
     if (!hasRunning) return
@@ -75,18 +90,62 @@ export default function Dashboard() {
     return () => clearInterval(interval)
   }, [projects, load])
 
+  useEffect(() => {
+    const hasRunning = projects.some(p => p.status === 'running' || p.status === 'pending')
+    if (!hasRunning) return
+    const interval = setInterval(() => setNowMs(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [projects])
+
+  useEffect(() => {
+    if (mode === 'simple') return
+    if (planningApiBaseSource) return
+    const inferred = inferApiBaseSourceFromModel(planningModel || 'local/qwen3.5:27b')
+    if (inferred) setPlanningApiBaseSource(inferred)
+  }, [mode, planningModel, planningApiBaseSource])
+
+  useEffect(() => {
+    if (mode !== 'orchestrated') return
+    if (reviewApiBaseSource) return
+    const inferred = inferApiBaseSourceFromModel(reviewModel || 'anthropic/claude-sonnet-4-5')
+    if (inferred) setReviewApiBaseSource(inferred)
+  }, [mode, reviewModel, reviewApiBaseSource])
+
+  useEffect(() => {
+    if (mode === 'discovery') return
+    if (codingApiBaseSource) return
+    const inferred = inferApiBaseSourceFromModel(codingModel)
+    if (inferred) setCodingApiBaseSource(inferred)
+  }, [mode, codingModel, codingApiBaseSource])
+
+  const getElapsedSeconds = (project: ProjectSummary): number | null => {
+    if (project.status === 'running' || project.status === 'pending') {
+      if (typeof project.duration === 'number' && project.duration >= 0) return project.duration
+      const createdMs = new Date(project.created_at).getTime()
+      if (!Number.isFinite(createdMs)) return null
+      return Math.max(0, (nowMs - createdMs) / 1000)
+    }
+    return typeof project.duration === 'number' ? project.duration : null
+  }
+
   const handleCreate = async () => {
     if (!query.trim()) return
     setCreating(true)
     try {
       const project = await createProject({
         query, mode, files, numPapers, daysBack,
-        modelProvider: modelProvider || undefined,
         planningModel: planningModel || undefined,
+        reviewModel: reviewModel || undefined,
         codingModel: codingModel || undefined,
-        modelLitellmApiBase: modelLitellmApiBase || undefined,
-        modelCodingApiBase: modelCodingApiBase || undefined,
-        modelApiKey: modelApiKey || undefined,
+        modelOpenaiApiBase: modelOpenaiApiBase || undefined,
+        modelAnthropicApiBase: modelAnthropicApiBase || undefined,
+        modelLocalApiBase: modelLocalApiBase || undefined,
+        modelPlanningApiBaseSource: planningApiBaseSource || undefined,
+        modelReviewApiBaseSource: reviewApiBaseSource || undefined,
+        modelCodingApiBaseSource: codingApiBaseSource || undefined,
+        modelOpenaiApiKey: modelOpenaiApiKey || undefined,
+        modelAnthropicApiKey: modelAnthropicApiKey || undefined,
+        modelLocalApiKey: modelLocalApiKey || undefined,
         maxCostUsd: typeof maxCostUsd === 'number' && maxCostUsd > 0 ? maxCostUsd : undefined,
         baseProjectId: baseProjectId || undefined,
       })
@@ -306,109 +365,38 @@ export default function Dashboard() {
                 <span className="flex items-center gap-2">
                   <Settings2 className="w-4 h-4 text-gray-400" />
                   Model Settings
-                  {modelProvider && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-100 text-brand-700 font-semibold">
-                      {modelProvider === 'local'
-                        ? 'Local'
-                        : modelProvider === 'openrouter'
-                          ? 'OpenRouter'
-                          : modelProvider === 'openai'
-                            ? 'OpenAI'
-                            : modelProvider === 'anthropic'
-                              ? 'Anthropic'
-                              : 'Bedrock'}
-                    </span>
-                  )}
                 </span>
                 {showModelSettings ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
               </button>
               {showModelSettings && (
                 <div className="px-4 pb-4 space-y-4 border-t border-gray-100 animate-fade-in">
-                  {/* Provider */}
-                  <div className="pt-3">
-                    <label className="block text-xs font-medium text-gray-500 mb-2">Provider</label>
-                    <div className="flex gap-2 flex-wrap">
-                      {[
-                        // { id: '', label: 'Default (env)', icon: Cpu, desc: 'From .env config' },
-                        // { id: 'bedrock', label: 'Bedrock', icon: Cpu, desc: 'AWS Bedrock' },
-                        { id: 'openai', label: 'OpenAI', icon: Cpu, desc: 'OpenAI API' },
-                        { id: 'anthropic', label: 'Anthropic', icon: Cpu, desc: 'Anthropic API' },
-                        { id: 'openrouter', label: 'OpenRouter', icon: Globe, desc: 'OpenRouter API' },
-                        { id: 'local', label: 'Local', icon: Server, desc: 'vLLM / Ollama / HF' },
-                      ].map(p => (
-                        <button
-                          key={p.id}
-                          onClick={() => {
-                            setModelProvider(p.id)
-                            // Set preset models when switching provider
-                            if (p.id === 'bedrock') {
-                              setPlanningModel('bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0')
-                              setCodingModel('us.anthropic.claude-sonnet-4-5-20250929-v1:0')
-                              setModelLitellmApiBase('')
-                              setModelCodingApiBase('')
-                            } else if (p.id === 'openai') {
-                              setPlanningModel('gpt-4.1-mini')
-                              setCodingModel('claude-sonnet-4-5-20250929')
-                              setModelLitellmApiBase('https://api.openai.com/v1')
-                              setModelCodingApiBase('https://api.anthropic.com')
-                            } else if (p.id === 'anthropic') {
-                              setPlanningModel('claude-sonnet-4-5')
-                              setCodingModel('claude-sonnet-4-5-20250929')
-                              setModelLitellmApiBase('https://api.anthropic.com')
-                              setModelCodingApiBase('https://api.anthropic.com')
-                            } else if (p.id === 'openrouter') {
-                              setPlanningModel('anthropic/claude-sonnet-4-5')
-                              setCodingModel('claude-sonnet-4-5-20250929')
-                              setModelLitellmApiBase('https://openrouter.ai/api/v1')
-                              setModelCodingApiBase('https://api.anthropic.com')
-                            } else if (p.id === 'local') {
-                              setPlanningModel('qwen3.5:27b')
-                              setCodingModel('qwen3-coder:30b')
-                              setModelLitellmApiBase('http://localhost:11434')
-                              setModelCodingApiBase('http://localhost:11434')
-                            } else {
-                              setPlanningModel('')
-                              setCodingModel('')
-                              setModelLitellmApiBase('')
-                              setModelCodingApiBase('')
-                            }
-                          }}
-                          className={`flex-1 px-3 py-2 rounded-lg border text-xs font-medium transition-all ${
-                            modelProvider === p.id
-                              ? 'border-brand-400 bg-brand-50 text-brand-700 ring-1 ring-brand-200'
-                              : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                          }`}
-                        >
-                          <p.icon className="w-3.5 h-3.5 mx-auto mb-1" />
-                          <div>{p.label}</div>
-                          <div className="text-[9px] opacity-60 mt-0.5">{p.desc}</div>
-                        </button>
-                      ))}
-                    </div>
+                  <div className="pt-3 text-[11px] text-gray-500">
+                    Provider is inferred from each model prefix (for example <span className="font-mono">openai/gpt-4o</span>, <span className="font-mono">anthropic/claude-sonnet-4-5</span>, <span className="font-mono">ollama/qwen3.5:27b</span>).
                   </div>
 
                   <>
-                    {/* Planning Model */}
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">
-                        Planning / Review Model
-                      </label>
-                      <input
-                        value={planningModel}
-                        onChange={e => setPlanningModel(e.target.value)}
-                        placeholder={modelProvider === 'local' ? 'qwen3.5:27b' : 'Leave empty for env default'}
-                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
-                      />
-                      {modelProvider === 'local' && (
+                    {mode !== 'simple' && (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">
+                          Planning Model
+                        </label>
+                        <input
+                          value={planningModel || 'local/qwen3.5:27b'}
+                          onChange={e => setPlanningModel(e.target.value)}
+                          placeholder="e.g. openai/gpt-4.1-mini"
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
+                        />
                         <div className="flex flex-wrap gap-1 mt-1.5">
                           {[
-                            'qwen3.5:27b',
-                            'qwen3-coder:30b',
-                            'glm-4.7-flash',
-                            'granite4',
-                            'qwen2.5-coder:32b',
-                            'deepseek-r1:14b',
-                            'llama4-maverick:17b',
+                            'openai/gpt-4.1-mini',
+                            'anthropic/claude-sonnet-4-5-20250929',
+                            'local/qwen3.5:27b',
+                            'local/qwen3-coder:30b',
+                            'local/qwen4:27b',
+                            'local/qwen4-coder:30b',
+                            'local/qwen2.5-coder:32b',
+                            'local/deepseek-r1:14b',
+                            'local/llama4-maverick:17b',
                           ].map(m => (
                             <button
                               key={m}
@@ -421,31 +409,97 @@ export default function Dashboard() {
                             </button>
                           ))}
                         </div>
-                      )}
-                    </div>
+                        <div className="mt-2">
+                          <label className="block text-[10px] font-medium text-gray-400 mb-1">
+                            Planning API Base Source
+                          </label>
+                          <select
+                            value={planningApiBaseSource}
+                            onChange={e => setPlanningApiBaseSource(e.target.value)}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs bg-white focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
+                          >
+                            <option value="">Auto (from model provider)</option>
+                            <option value="openai">OpenAI API Base URL</option>
+                            <option value="anthropic">Anthropic API Base URL</option>
+                            <option value="local">Local / Ollama API Base URL</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
 
-                    {/* Coding Model */}
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">
-                        Coding Model <span className="text-gray-300">(Claude Code SDK)</span>
-                      </label>
-                      <input
-                        value={codingModel}
-                        onChange={e => setCodingModel(e.target.value)}
-                        placeholder="Leave empty for env default"
-                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
-                      />
-                      { (
+                    {mode !== 'simple' && mode !== 'discovery' && (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">
+                          Review Model
+                        </label>
+                        <input
+                          value={reviewModel || 'anthropic/claude-sonnet-4-5'}
+                          onChange={e => setReviewModel(e.target.value)}
+                          placeholder="e.g. anthropic/claude-sonnet-4-5"
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
+                        />
                         <div className="flex flex-wrap gap-1 mt-1.5">
                           {[
-                            'claude-sonnet-4-5-20250929',
-                            'qwen3.5:27b',
-                            'qwen3-coder:30b',
-                            'qwen4:27b',
-                            'qwen4-coder:30b',
-                            'qwen2.5-coder:32b',
-                            'deepseek-r1:14b',
-                            'llama4-maverick:17b',
+                            'openai/gpt-4.1-mini',
+                            'anthropic/claude-sonnet-4-5',
+                            'local/qwen3.5:27b',
+                            'local/qwen3-coder:30b',
+                            'local/qwen4:27b',
+                            'local/qwen4-coder:30b',
+                            'local/qwen2.5-coder:32b',
+                            'local/deepseek-r1:14b',
+                            'local/llama4-maverick:17b',
+                          ].map(m => (
+                            <button
+                              key={m}
+                              onClick={() => setReviewModel(m)}
+                              className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                                reviewModel === m ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-400 hover:text-gray-600'
+                              }`}
+                            >
+                              {m.split('/').pop()}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="mt-2">
+                          <label className="block text-[10px] font-medium text-gray-400 mb-1">
+                            Review API Base Source
+                          </label>
+                          <select
+                            value={reviewApiBaseSource}
+                            onChange={e => setReviewApiBaseSource(e.target.value)}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs bg-white focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
+                          >
+                            <option value="">Auto (from model provider)</option>
+                            <option value="openai">OpenAI API Base URL</option>
+                            <option value="anthropic">Anthropic API Base URL</option>
+                            <option value="local">Local / Ollama API Base URL</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    {mode !== 'discovery' && (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">
+                          Coding Model <span className="text-gray-300">(Claude Code SDK)</span>
+                        </label>
+                        <input
+                          value={codingModel}
+                          onChange={e => setCodingModel(e.target.value)}
+                          placeholder="e.g. anthropic/claude-sonnet-4-5-20250929"
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
+                        />
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {[
+                            'anthropic/claude-sonnet-4-5',
+                            'local/qwen3.5:27b',
+                            'local/qwen3-coder:30b',
+                            'local/qwen4:27b',
+                            'local/qwen4-coder:30b',
+                            'local/qwen2.5-coder:32b',
+                            'local/deepseek-r1:14b',
+                            'local/llama4-maverick:17b',
                           ].map(m => (
                             <button
                               key={m}
@@ -458,71 +512,99 @@ export default function Dashboard() {
                             </button>
                           ))}
                         </div>
-                      )}
-                      <p className="text-[10px] text-gray-400 mt-1">
-                        Coding uses Claude Code CLI (requires Anthropic or Bedrock credentials)
-                      </p>
+                        <p className="text-[10px] text-gray-400 mt-1">
+                          Coding uses Claude Code CLI; provider is inferred from the coding model prefix.
+                        </p>
+                        <div className="mt-2">
+                          <label className="block text-[10px] font-medium text-gray-400 mb-1">
+                            Coding API Base Source
+                          </label>
+                          <select
+                            value={codingApiBaseSource}
+                            onChange={e => setCodingApiBaseSource(e.target.value)}
+                            className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs bg-white focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
+                          >
+                            <option value="">Auto (from model provider)</option>
+                            <option value="openai">OpenAI API Base URL</option>
+                            <option value="anthropic">Anthropic API Base URL</option>
+                            <option value="local">Local / Ollama API Base URL</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">
+                        OpenAI API Base URL
+                      </label>
+                      <input
+                        value={modelOpenaiApiBase || "https://api.openai.com/v1"}
+                        onChange={e => setModelOpenaiApiBase(e.target.value)}
+                        placeholder="https://api.openai.com/v1"
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">
+                        OpenAI API Key <span className="text-gray-300">(optional)</span>
+                      </label>
+                      <input
+                        type="password"
+                        value={modelOpenaiApiKey}
+                        onChange={e => setModelOpenaiApiKey(e.target.value)}
+                        placeholder="Leave empty for env default"
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
+                      />
                     </div>
 
-                    {/* LiteLLM API Base URL (planning/review/default) */}
-                    {(modelProvider === 'anthropic' || modelProvider === 'openai' || modelProvider === 'openrouter' || modelProvider === 'local') && (
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">
-                          LiteLLM API Base URL
-                        </label>
-                        <input
-                          value={modelLitellmApiBase}
-                          onChange={e => setModelLitellmApiBase(e.target.value)}
-                          placeholder={
-                            modelProvider === 'openai'
-                              ? 'https://api.openai.com/v1'
-                              : modelProvider === 'openrouter'
-                                ? 'https://openrouter.ai/api/v1'
-                                : modelProvider === 'local'
-                                  ? 'http://localhost:11434'
-                                  : 'https://api.anthropic.com'
-                          }
-                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none font-mono"
-                        />
-                        <p className="text-[10px] text-gray-400 mt-1">
-                          Base URL for default/planning/review LiteLLM calls.
-                        </p>
-                      </div>
-                    )}
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">
+                        Anthropic API Base URL
+                      </label>
+                      <input
+                        value={modelAnthropicApiBase}
+                        onChange={e => setModelAnthropicApiBase(e.target.value)}
+                        placeholder="https://api.anthropic.com"
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">
+                        API Key <span className="text-gray-300">(optional)</span>
+                      </label>
+                      <input
+                        type="password"
+                        value={modelAnthropicApiKey}
+                        onChange={e => setModelAnthropicApiKey(e.target.value)}
+                        placeholder="Leave empty for env default"
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
+                      />
+                    </div>
 
-                    {/* Claude Code API Base URL (coding) */}
-                    {(modelProvider === 'anthropic' || modelProvider === 'openai' || modelProvider === 'openrouter' || modelProvider === 'local') && (
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">
-                          Claude Code API Base URL
-                        </label>
-                        <input
-                          value={modelCodingApiBase}
-                          onChange={e => setModelCodingApiBase(e.target.value)}
-                          placeholder={modelProvider === 'local' ? 'http://localhost:11434' : 'https://api.anthropic.com'}
-                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none font-mono"
-                        />
-                        <p className="text-[10px] text-gray-400 mt-1">
-                          Base URL for coding model calls via Claude Code SDK.
-                        </p>
-                      </div>
-                    )}
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">
+                        Local / Ollama API Base URL
+                      </label>
+                      <input
+                        value={modelLocalApiBase || 'http://localhost:11434'}
+                        onChange={e => setModelLocalApiBase(e.target.value)}
+                        placeholder="http://localhost:11434"
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none font-mono"
+                      />
+                    </div>
 
-                    {/* API Key (optional) */}
-                    {(modelProvider === 'openrouter' || modelProvider === 'openai' || modelProvider === 'anthropic' || modelProvider === 'local' || modelProvider === '') && (
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">
-                          API Key <span className="text-gray-300">(optional)</span>
-                        </label>
-                        <input
-                          type="password"
-                          value={modelApiKey}
-                          onChange={e => setModelApiKey(e.target.value)}
-                          placeholder={modelProvider === 'local' ? 'Not needed for most local servers' : 'Leave empty for env default'}
-                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
-                        />
-                      </div>
-                    )}
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">
+                        Local/Ollama API Key <span className="text-gray-300">(optional)</span>
+                      </label>
+                      <input
+                        type="password"
+                        value={modelLocalApiKey}
+                        onChange={e => setModelLocalApiKey(e.target.value)}
+                        placeholder="Leave empty for env default"
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
+                      />
+                    </div>
 
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">
@@ -545,11 +627,9 @@ export default function Dashboard() {
                       </p>
                     </div>
 
-                    {!modelProvider && (
-                      <p className="text-xs text-gray-400 pt-1">
-                        Using environment defaults unless you fill in overrides above.
-                      </p>
-                    )}
+                    <p className="text-xs text-gray-400 pt-1">
+                      Provider is inferred per model from prefix; leave fields empty to use environment defaults.
+                    </p>
                   </>
                 </div>
               )}
@@ -610,31 +690,70 @@ export default function Dashboard() {
                   </div>
                   <h3 className="text-sm font-medium text-gray-900 truncate">{p.query}</h3>
                   {p.llm_config && (
-                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                      <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">
-                        <Server className="w-2.5 h-2.5" />
-                        {p.llm_config.provider === 'local' ? 'Local' : p.llm_config.provider}
-                      </span>
-                      {p.llm_config.planning_model && (
-                        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 font-mono" title="Planning model">
-                          {p.llm_config.planning_model.split('/').pop()}
+                    <>
+                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">
+                          <Server className="w-2.5 h-2.5" />
+                          {p.llm_config.provider === 'local' ? 'Local' : p.llm_config.provider}
                         </span>
-                      )}
-                      {p.llm_config.coding_model && p.llm_config.coding_model !== p.llm_config.planning_model && (
-                        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-600 font-mono" title="Coding model">
-                          <Cpu className="w-2.5 h-2.5" />
-                          {p.llm_config.coding_model.split('/').pop()}
-                        </span>
-                      )}
-                    </div>
+                        {p.mode !== 'simple' && p.llm_config.planning_model && (
+                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 font-mono" title="Planning model">
+                            {p.llm_config.planning_model.split('/').pop()}
+                          </span>
+                        )}
+                        {p.mode == 'orchestrated' && p.llm_config.review_model && (
+                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 font-mono" title="Review model">
+                            {p.llm_config.review_model.split('/').pop()}
+                          </span>
+                        )}
+                        {p.mode !== 'discovery' && p.llm_config.coding_model && (
+                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 font-mono" title="Coding model">
+                            {p.llm_config.coding_model.split('/').pop()}
+                          </span>
+                        )}
+                        {/* {p.llm_config.coding_model && p.llm_config.coding_model !== p.llm_config.planning_model && (
+                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-600 font-mono" title="Coding model">
+                            <Cpu className="w-2.5 h-2.5" />
+                            {p.llm_config.coding_model.split('/').pop()}
+                          </span>
+                        )} */}
+                      </div>
+
+                      {(() => {
+                        const apiBases = [
+                          { label: 'OpenAI', value: p.llm_config.openai_api_base },
+                          { label: 'Anthropic', value: p.llm_config.anthropic_api_base },
+                          { label: 'Local', value: p.llm_config.local_api_base },
+                          { label: 'LiteLLM', value: p.llm_config.litellm_api_base },
+                          { label: 'Legacy', value: p.llm_config.api_base },
+                        ].filter(item => !!item.value)
+
+                        if (apiBases.length === 0) return null
+
+                        return (
+                          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                            {apiBases.map(item => (
+                              <span
+                                key={`${item.label}-${item.value}`}
+                                className="inline-flex max-w-[220px] items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-gray-50 text-gray-500 font-mono"
+                                title={`${item.label} API Base: ${item.value}`}
+                              >
+                                <span className="text-gray-400 font-sans">{item.label}:</span>
+                                <span className="truncate">{item.value}</span>
+                              </span>
+                            ))}
+                          </div>
+                        )
+                      })()}
+                    </>
                   )}
                   <div className="flex items-center gap-4 mt-2 text-xs text-gray-400">
                     <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />
                       {timeAgo(p.created_at)}
                     </span>
-                    {p.duration !== null && (
-                      <span>Duration: {formatDuration(p.duration)}</span>
+                    {getElapsedSeconds(p) !== null && (
+                      <span>Elapsed: {formatDuration(getElapsedSeconds(p))}</span>
                     )}
                     {p.stages_total > 0 && (
                       <span>Stages: {p.stages_completed}/{p.stages_total}</span>

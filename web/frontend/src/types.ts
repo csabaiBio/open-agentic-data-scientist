@@ -53,16 +53,23 @@ export interface GeneratedFile {
   created_at: string
 }
 
-export type ModelProvider = 'bedrock' | 'openrouter' | 'openai' | 'anthropic' | 'local'
+export type ModelProvider = 'openai' | 'anthropic' | 'local'
 
 export interface ModelConfig {
-  provider: ModelProvider
+  provider: ModelProvider | string
+  planning_provider: ModelProvider | string | null
+  review_provider: ModelProvider | string | null
+  coding_provider: ModelProvider | string | null
   planning_model: string
+  review_model: string
   coding_model: string
+  openai_api_base: string | null
+  anthropic_api_base: string | null
+  local_api_base: string | null
+  planning_api_base_source: string | null
+  review_api_base_source: string | null
+  coding_api_base_source: string | null
   litellm_api_base: string | null
-  coding_api_base: string | null
-  api_base: string | null
-  api_key: string | null
 }
 
 export interface Project {

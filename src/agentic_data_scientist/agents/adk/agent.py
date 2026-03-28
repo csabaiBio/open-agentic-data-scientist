@@ -27,10 +27,11 @@ from agentic_data_scientist.agents.adk.implementation_loop import make_implement
 from agentic_data_scientist.agents.adk.loop_detection import LoopDetectionAgent
 from agentic_data_scientist.agents.adk.review_confirmation import create_review_confirmation_agent
 from agentic_data_scientist.agents.adk.utils import (
-    DEFAULT_MODEL,
-    REVIEW_MODEL,
+    get_default_model,
     get_generate_content_config,
+    get_review_model,
     is_network_disabled,
+    resolve_provider_for_role,
 )
 from agentic_data_scientist.prompts import load_prompt
 
@@ -488,16 +489,18 @@ def create_agent(
     logger.info(f"[AgenticDS] Configured {len(tools)} local tools")
 
     provider_for_config = (model_config or {}).get("provider") if model_config else None
+    review_provider_for_config = provider_for_config
 
     # Build custom models from model_config if provided
     if model_config:
         from agentic_data_scientist.agents.adk.utils import create_litellm_model_from_config
         planning_model = create_litellm_model_from_config(model_config, role="planning")
-        review_model = create_litellm_model_from_config(model_config, role="planning")
+        review_model = create_litellm_model_from_config(model_config, role="review")
+        review_provider_for_config = resolve_provider_for_role(model_config, role="review")
         logger.info(f"[AgenticDS] Using custom models from project config: provider={model_config.get('provider')}")
     else:
-        planning_model = DEFAULT_MODEL
-        review_model = REVIEW_MODEL
+        planning_model = get_default_model()
+        review_model = get_review_model()
 
     # ------------------------- Implementation Loop -------------------------
 
@@ -581,7 +584,7 @@ def create_agent(
                 thinking_budget=-1,
             ),
         ),
-        generate_content_config=get_generate_content_config(temperature=0.3, provider_override=provider_for_config),
+        generate_content_config=get_generate_content_config(temperature=0.3, provider_override=review_provider_for_config),
         after_agent_callback=plan_reviewer_compression,
     )
 
@@ -595,7 +598,7 @@ def create_agent(
                 auto_exit_on_completion=True,
                 prompt_name="plan_review_confirmation",
                 model_override=review_model,
-                provider_override=provider_for_config,
+                provider_override=review_provider_for_config,
             ),
         ],
         max_iterations=10,
@@ -645,7 +648,7 @@ def create_agent(
         output_schema=CRITERIA_CHECKER_OUTPUT_SCHEMA,
         output_key="criteria_checker_output",
         after_agent_callback=combined_criteria_callback,
-        generate_content_config=get_generate_content_config(temperature=0.0, provider_override=provider_for_config),
+        generate_content_config=get_generate_content_config(temperature=0.0, provider_override=review_provider_for_config),
     )
 
     # ------------------------- Stage Reflector -------------------------

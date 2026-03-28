@@ -5,14 +5,18 @@ This module provides model configuration, helper functions, and shared settings
 for the ADK agent system.
 """
 
+from __future__ import annotations
+
 import logging
 import os
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from dotenv import load_dotenv
-from google.adk.models.lite_llm import LiteLlm
-from google.adk.tools.tool_context import ToolContext
-from google.genai import types
+
+if TYPE_CHECKING:
+    from google.adk.models.lite_llm import LiteLlm
+    from google.adk.tools.tool_context import ToolContext
+    from google.genai import types
 
 
 load_dotenv(override=True)
@@ -151,6 +155,9 @@ __all__ = [
     'resolve_model_name',
     'calculate_llm_cost',
     'create_litellm_model',
+    'get_default_model',
+    'get_review_model',
+    'resolve_provider_for_role',
     'get_generate_content_config',
     'exit_loop_simple',
     'is_network_disabled',
@@ -191,25 +198,105 @@ def _normalize_model_name(provider: str, model_name: str) -> str:
         return model_name
 
     if provider == "openai" and "/" not in model_name:
-        # return f"openai/{model_name}"
-        return model_name
+        return f"openai/{model_name}"
+        # return model_name
     if provider == "anthropic" and "/" not in model_name:
         return f"anthropic/{model_name}"
     if provider == "openrouter" and model_name.startswith("openrouter/"):
         return model_name[len("openrouter/"):]
-    if provider == "local" and not model_name.startswith(("openai/", "ollama/", "huggingface/")):
+    # if provider == "local" and model_name.startswith(("local/", "ollama/", "huggingface/")):
+    if provider == "local" and "/" not in model_name:
+        # return f"local/{model_name}"
+        # model_name = model_name.split("/", 1)[-1]  # Remove any provider prefix for local models
         return model_name
     return model_name
+
+
+def _infer_provider_from_model_name(model_name: str) -> Optional[str]:
+    """Infer provider from model prefix when present (e.g., anthropic/..., openai/...)."""
+    if not model_name or "/" not in model_name:
+        return None
+    prefix = str(model_name).split("/", 1)[0].strip().lower()
+    if prefix in {"openai", "anthropic", "bedrock", "openrouter", "local"}:
+        return prefix
+    if prefix in {"ollama", "huggingface"}:
+        return "local"
+    return None
+
+
+def _resolve_api_base_for_provider(model_config: dict, provider: str, role: str) -> Optional[str]:
+    """Resolve API base URL from per-provider settings with backward-compatible fallbacks."""
+    provider = (provider or "").lower()
+    role = (role or "").lower()
+
+    source_key = {
+        "planning": "planning_api_base_source",
+        "review": "review_api_base_source",
+        "coding": "coding_api_base_source",
+    }.get(role)
+    selected_source = (model_config.get(source_key, "") if source_key else "").strip().lower()
+    if selected_source == "openai":
+        return model_config.get("openai_api_base")
+    if selected_source == "anthropic":
+        return model_config.get("anthropic_api_base")
+    if selected_source == "local":
+        return model_config.get("local_api_base") or "http://localhost:11434"
+
+    if provider == "openai":
+        return model_config.get("openai_api_base")
+    if provider == "anthropic":
+        return model_config.get("anthropic_api_base")
+    if provider == "local":
+        return model_config.get("local_api_base") or "http://localhost:11434"
+
+    return model_config.get("litellm_api_base")
+
+
+def resolve_provider_for_role(model_config: Optional[dict], role: str = "planning") -> str:
+    """Resolve effective provider for a role, allowing review model to use a different provider."""
+    if not model_config:
+        return LLM_PROVIDER
+
+    role_key = {
+        "planning": "planning_provider",
+        "review": "review_provider",
+        "coding": "coding_provider",
+    }.get((role or "").lower())
+    configured_provider = (model_config.get(role_key) or model_config.get("provider") or LLM_PROVIDER).lower()
+
+    model_name = resolve_model_name(model_config, role=role)
+    inferred_provider = _infer_provider_from_model_name(model_name)
+    if inferred_provider and inferred_provider != configured_provider:
+        logger.info(
+            "[AgenticDS] provider override by model role=%s configured_provider=%s inferred_provider=%s model=%s",
+            role,
+            configured_provider,
+            inferred_provider,
+            model_name,
+        )
+        return inferred_provider
+
+    return configured_provider
 
 
 def resolve_model_name(model_config: Optional[dict], role: str = "planning") -> str:
     """Resolve the effective model name for a given role and provider."""
     if not model_config:
-        default_name = CODING_MODEL_NAME if role == "coding" else DEFAULT_MODEL_NAME
+        if role == "coding":
+            default_name = CODING_MODEL_NAME
+        elif role == "review":
+            default_name = REVIEW_MODEL_NAME
+        else:
+            default_name = DEFAULT_MODEL_NAME
         return _normalize_model_name(LLM_PROVIDER, default_name)
 
     provider = (model_config.get("provider") or LLM_PROVIDER).lower()
-    model_name = model_config.get("planning_model" if role == "planning" else "coding_model", "")
+    if role == "coding":
+        model_name = model_config.get("coding_model", "")
+    elif role == "review":
+        model_name = model_config.get("review_model", "") or model_config.get("planning_model", "")
+    else:
+        model_name = model_config.get("planning_model", "")
 
     if not model_name:
         if role == "coding":
@@ -222,9 +309,11 @@ def resolve_model_name(model_config: Optional[dict], role: str = "planning") -> 
             elif provider == "bedrock":
                 model_name = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
             elif provider == "local":
-                model_name = "qwen2.5-coder:14b"
+                model_name = "qwen3-coder:30b"
             else:
                 model_name = CODING_MODEL_NAME
+        elif role == "review":
+            model_name = REVIEW_MODEL_NAME
         elif provider == "openrouter":
             model_name = "anthropic/claude-sonnet-4-5"
         elif provider == "anthropic":
@@ -296,10 +385,12 @@ def _resolve_provider_defaults(provider: str) -> tuple[Optional[str], Optional[s
         )
     if provider == "local":
         return (
-            os.getenv("OPENAI_API_BASE")
-            or os.getenv("ANTHROPIC_API_BASE")
-            or os.getenv("ANTHROPIC_BASE_URL"),
-            os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY"),
+            os.getenv("LOCAL_API_BASE")
+            or os.getenv("OLLAMA_API_BASE")
+            or os.getenv("OLLAMA_BASE_URL")
+            or os.getenv("LOCAL_LLM_API_BASE")
+            or "http://localhost:11434",
+            os.getenv("LOCAL_API_KEY") or os.getenv("OLLAMA_API_KEY"),
         )
     return (None, None)
 
@@ -329,6 +420,17 @@ def _log_litellm_target(provider: str, model_name: str, api_base: Optional[str],
     )
 
 
+def _sanitize_openrouter_model(model_name: str) -> str:
+    """Ensure OpenRouter receives raw provider/model ID, not openrouter-prefixed forms."""
+
+    if not model_name:
+        return model_name
+    sanitized = str(model_name).strip()
+    while sanitized.startswith("openrouter/"):
+        sanitized = sanitized[len("openrouter/"):]
+    return sanitized
+
+
 def create_litellm_model(model_name: str, num_retries: int = 10, timeout: int = 300,
                          provider_override: Optional[str] = None, api_base_override: Optional[str] = None,
                          api_key_override: Optional[str] = None) -> LiteLlm:
@@ -355,22 +457,35 @@ def create_litellm_model(model_name: str, num_retries: int = 10, timeout: int = 
     LiteLlm
         Configured model instance
     """
+    from google.adk.models.lite_llm import LiteLlm
+
     provider = (provider_override or LLM_PROVIDER).lower()
+    inferred_provider = _infer_provider_from_model_name(model_name)
+    if inferred_provider and inferred_provider != provider:
+        logger.info(
+            "[AgenticDS] provider override by direct model name configured_provider=%s inferred_provider=%s model=%s",
+            provider,
+            inferred_provider,
+            model_name,
+        )
+        provider = inferred_provider
     model_name = _normalize_model_name(provider, model_name)
     default_api_base, default_api_key = _resolve_provider_defaults(provider)
     effective_api_base = api_base_override or default_api_base
     effective_api_key = api_key_override or default_api_key
 
-    _log_litellm_target(provider, model_name, effective_api_base)
-
     if provider == "local":
         # Local provider: vLLM, Ollama, TGI, or any OpenAI-compatible server
+        local_model_name = model_name[len("local/"):] if model_name.startswith("local/") else model_name
+        _log_litellm_target(provider, local_model_name, effective_api_base)
         kwargs = {
-            "model": model_name,
+            "model": local_model_name,
             "num_retries": num_retries,
             "timeout": timeout,
             "custom_llm_provider": "openai",
         }
+        if effective_api_base and not effective_api_base.endswith("/v1"):
+            effective_api_base += "/v1"
         if effective_api_base:
             kwargs["api_base"] = effective_api_base
         if effective_api_key:
@@ -378,24 +493,33 @@ def create_litellm_model(model_name: str, num_retries: int = 10, timeout: int = 
         else:
             # Local servers often don't need a key; set a dummy to avoid LiteLLM errors
             kwargs["api_key"] = "not-needed"
+        print(kwargs)
         return LiteLlm(**kwargs)
     elif provider == "bedrock":
+        _log_litellm_target(provider, model_name, effective_api_base)
         return LiteLlm(
             model=model_name,
             num_retries=num_retries,
             timeout=timeout,
         )
     elif provider == "openrouter":
-        print(f"Creating LiteLlm for OpenRouter with model={model_name} api_base={effective_api_base}")
+        openrouter_model = _sanitize_openrouter_model(model_name)
+        if openrouter_model != model_name:
+            logger.info("[LiteLLM] normalized OpenRouter model from %s to %s", model_name, openrouter_model)
+        _log_litellm_target(provider, openrouter_model, effective_api_base)
         return LiteLlm(
-            model=model_name,
+            model=openrouter_model,
             num_retries=num_retries,
             timeout=timeout,
             api_base=effective_api_base or OPENROUTER_API_BASE,
             api_key=effective_api_key or OPENROUTER_API_KEY,
-            custom_llm_provider="openrouter",
         )
     elif provider == "openai":
+        _log_litellm_target(provider, model_name, effective_api_base)
+        if effective_api_base and not effective_api_base.endswith("/v1"):
+            effective_api_base += "/v1"
+        if model_name.startswith("openai/"):
+            model_name = model_name[len("openai/"):]
         kwargs = {
             "model": model_name,
             "num_retries": num_retries,
@@ -408,6 +532,7 @@ def create_litellm_model(model_name: str, num_retries: int = 10, timeout: int = 
         print(kwargs)
         return LiteLlm(**kwargs)
     elif provider == "anthropic":
+        _log_litellm_target(provider, model_name, effective_api_base)
         kwargs = {
             "model": model_name,
             "num_retries": num_retries,
@@ -420,6 +545,7 @@ def create_litellm_model(model_name: str, num_retries: int = 10, timeout: int = 
         print(kwargs)
         return LiteLlm(**kwargs)
     else:
+        _log_litellm_target(provider, model_name, effective_api_base)
         return LiteLlm(
             model=model_name,
             num_retries=num_retries,
@@ -437,7 +563,7 @@ def create_litellm_model_from_config(model_config: dict, role: str = "planning",
     model_config : dict
         Model configuration with keys: provider, planning_model, coding_model, api_base, api_key
     role : str
-        Which model to use: "planning" or "coding"
+        Which model to use: "planning", "review", or "coding"
     num_retries : int
         Number of retries on failure
     timeout : int
@@ -451,8 +577,26 @@ def create_litellm_model_from_config(model_config: dict, role: str = "planning",
     if not model_config:
         return create_litellm_model(DEFAULT_MODEL_NAME, num_retries, timeout)
 
-    provider = model_config.get("provider", LLM_PROVIDER)
-    litellm_api_base = model_config.get("litellm_api_base") or model_config.get("api_base")
+    role_key = {
+        "planning": "planning_provider",
+        "review": "review_provider",
+        "coding": "coding_provider",
+    }.get((role or "").lower())
+    configured_provider = (model_config.get(role_key) or model_config.get("provider") or LLM_PROVIDER).lower()
+    provider = resolve_provider_for_role(model_config, role=role)
+    litellm_api_base = _resolve_api_base_for_provider(model_config, provider, role)
+    api_key = model_config.get("api_key")
+    if provider != configured_provider:
+        if litellm_api_base:
+            logger.info(
+                "[AgenticDS] ignoring shared litellm_api_base for role=%s due to provider change %s -> %s",
+                role,
+                configured_provider,
+                provider,
+            )
+        litellm_api_base = None
+        api_key = None
+
     model_name = resolve_model_name(model_config, role=role)
     _log_litellm_target(provider, model_name, litellm_api_base, role=role)
 
@@ -460,13 +604,43 @@ def create_litellm_model_from_config(model_config: dict, role: str = "planning",
         model_name, num_retries, timeout,
         provider_override=provider,
         api_base_override=litellm_api_base,
-        api_key_override=model_config.get("api_key"),
+        api_key_override=api_key,
     )
 
 
-# Create LiteLLM model instances
-DEFAULT_MODEL = create_litellm_model(DEFAULT_MODEL_NAME)
-REVIEW_MODEL = create_litellm_model(REVIEW_MODEL_NAME)
+_DEFAULT_MODEL_INSTANCE: Optional[LiteLlm] = None
+_REVIEW_MODEL_INSTANCE: Optional[LiteLlm] = None
+
+
+def get_default_model() -> LiteLlm:
+    """Return cached default LiteLlm model (created lazily on first use)."""
+    global _DEFAULT_MODEL_INSTANCE
+    if _DEFAULT_MODEL_INSTANCE is None:
+        _DEFAULT_MODEL_INSTANCE = create_litellm_model(DEFAULT_MODEL_NAME)
+    return _DEFAULT_MODEL_INSTANCE
+
+
+def get_review_model() -> LiteLlm:
+    """Return cached review LiteLlm model (created lazily on first use)."""
+    global _REVIEW_MODEL_INSTANCE
+    if _REVIEW_MODEL_INSTANCE is None:
+        _REVIEW_MODEL_INSTANCE = create_litellm_model(REVIEW_MODEL_NAME)
+    return _REVIEW_MODEL_INSTANCE
+
+
+class _LazyLiteLlm:
+    """Lazy proxy for LiteLlm to avoid network-dependent startup work at import time."""
+
+    def __init__(self, getter: Callable[[], LiteLlm]):
+        self._getter = getter
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._getter(), name)
+
+
+# Backward-compatible exports that are initialized lazily
+DEFAULT_MODEL = _LazyLiteLlm(get_default_model)
+REVIEW_MODEL = _LazyLiteLlm(get_review_model)
 
 # Language requirement (empty for English-only models)
 LANGUAGE_REQUIREMENT = ""
@@ -535,6 +709,8 @@ def get_generate_content_config(
     types.GenerateContentConfig
         Configuration for content generation
     """
+    from google.genai import types
+
     config_kwargs = {
         "temperature": temperature,
         "max_output_tokens": output_tokens,

@@ -489,12 +489,6 @@ export default function ProjectDetail() {
                         <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.litellm_api_base || project.llm_config.api_base}</span>
                       </div>
                     )}
-                    {project.llm_config.coding_api_base && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-gray-500">Coding Base</span>
-                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.coding_api_base}</span>
-                      </div>
-                    )}
                   </div>
                 </div>
               )}

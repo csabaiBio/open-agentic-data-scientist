@@ -15,8 +15,6 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-from agentic_data_scientist import DataScientist
-
 from .models import (
     DiscoveryResult,
     GeneratedFile,
@@ -514,6 +512,7 @@ class ProjectManager:
                     query=project.query,
                     num_papers=project.num_papers,
                     days_back=project.days_back,
+                    model_config=project.llm_config.model_dump(exclude_none=True) if project.llm_config else None,
                     emit=discovery_emit,
                 )
 
@@ -661,14 +660,42 @@ class ProjectManager:
         if project.llm_config:
             mc = project.llm_config.model_dump(exclude_none=True)
             # Propagate custom Claude endpoint to both supported env var names.
-            coding_api_base = project.llm_config.coding_api_base or project.llm_config.api_base
+            coding_model = (project.llm_config.coding_model or "").strip().lower()
+            coding_provider = (project.llm_config.coding_provider or "").strip().lower()
+            if not coding_provider:
+                if coding_model.startswith("openai/"):
+                    coding_provider = "openai"
+                elif coding_model.startswith("anthropic/"):
+                    coding_provider = "anthropic"
+                elif coding_model.startswith("ollama/") or coding_model.startswith("local/"):
+                    coding_provider = "local"
+                else:
+                    coding_provider = (project.llm_config.provider or "openai").lower()
+
+            selected_coding_base_source = (project.llm_config.coding_api_base_source or "").strip().lower()
+            if selected_coding_base_source == "openai":
+                coding_api_base = project.llm_config.openai_api_base
+            elif selected_coding_base_source == "anthropic":
+                coding_api_base = project.llm_config.anthropic_api_base
+            elif selected_coding_base_source == "local":
+                coding_api_base = project.llm_config.local_api_base
+            elif coding_provider == "openai":
+                coding_api_base = project.llm_config.openai_api_base
+            elif coding_provider == "anthropic":
+                coding_api_base = project.llm_config.anthropic_api_base
+            elif coding_provider == "local":
+                coding_api_base = project.llm_config.local_api_base
+            else:
+                coding_api_base = None
             if coding_api_base:
                 os.environ["ANTHROPIC_BASE_URL"] = coding_api_base
                 os.environ["ANTHROPIC_API_BASE"] = coding_api_base
 
                 # Local Anthropic-compatible servers (e.g., Ollama) need this token.
-                if project.llm_config.provider == "local":
+                if coding_provider == "local":
                     os.environ["ANTHROPIC_AUTH_TOKEN"] = "ollama"
+
+        from agentic_data_scientist import DataScientist
 
         core = DataScientist(
             agent_type=agent_type,
