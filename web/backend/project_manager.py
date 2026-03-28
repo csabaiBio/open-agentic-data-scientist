@@ -694,7 +694,7 @@ class ProjectManager:
                 # Local Anthropic-compatible servers (e.g., Ollama) need this token.
                 if coding_provider == "local":
                     os.environ["ANTHROPIC_AUTH_TOKEN"] = "ollama"
-
+        print("PROJECT  ", coding_provider, coding_api_base, selected_coding_base_source, project.llm_config.local_api_base  )
         from agentic_data_scientist import DataScientist
 
         core = DataScientist(

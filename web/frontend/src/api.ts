@@ -2,6 +2,11 @@ import type { Project, ProjectEvent, ProjectSummary } from './types'
 
 const BASE = new URL('api/', `${window.location.origin}${import.meta.env.BASE_URL}`).pathname.replace(/\/$/, '')
 
+export async function warmBackend(): Promise<void> {
+  const res = await fetch(`${BASE}/warmup`, { method: 'POST' })
+  if (!res.ok) throw new Error('Failed to warm backend')
+}
+
 export async function fetchProjects(): Promise<ProjectSummary[]> {
   const res = await fetch(`${BASE}/projects`)
   if (!res.ok) throw new Error('Failed to fetch projects')

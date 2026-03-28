@@ -1,6 +1,7 @@
 """FastAPI application for Agentic Data Scientist web interface."""
 
 import asyncio
+import importlib
 import json
 import logging
 import mimetypes
@@ -26,6 +27,10 @@ from .project_manager import ProjectManager
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Agentic Data Scientist", version="0.2.0")
+app.state.backend_warmup_task = None
+app.state.backend_warmup_completed = False
+app.state.backend_warmup_error = None
+_backend_warmup_lock = asyncio.Lock()
 
 app.add_middleware(
     CORSMiddleware,
@@ -36,6 +41,39 @@ app.add_middleware(
 )
 
 manager = ProjectManager()
+
+
+def _warm_backend_imports() -> None:
+    """Import slow modules in a background thread after the UI is ready."""
+    modules = [
+        "agentic_data_scientist.core.api",
+        "agentic_data_scientist.agents.adk.agent",
+        "agentic_data_scientist.agents.claude_code.agent",
+        "google.adk.runners",
+        "google.adk.sessions",
+        "google.adk.models.lite_llm",
+        "google.genai.types",
+    ]
+    for module_name in modules:
+        importlib.import_module(module_name)
+
+
+async def _run_backend_warmup() -> None:
+    """Warm heavy imports without blocking request handling."""
+    if app.state.backend_warmup_completed:
+        return
+
+    try:
+        logger.info("Starting deferred backend warmup")
+        await asyncio.to_thread(_warm_backend_imports)
+        app.state.backend_warmup_completed = True
+        app.state.backend_warmup_error = None
+        logger.info("Deferred backend warmup completed")
+    except Exception as e:
+        app.state.backend_warmup_error = str(e)
+        logger.exception("Deferred backend warmup failed")
+    finally:
+        app.state.backend_warmup_task = None
 
 
 def _infer_provider_from_model_name(model_name: str) -> str:
@@ -52,6 +90,25 @@ def _infer_provider_from_model_name(model_name: str) -> str:
 
 
 # ── Projects CRUD ──────────────────────────────────────────────────
+
+@app.post("/api/warmup")
+async def warmup_backend():
+    """Schedule heavy backend imports after the UI has become interactive."""
+    if app.state.backend_warmup_completed:
+        return {"status": "ready"}
+
+    existing_task = app.state.backend_warmup_task
+    if existing_task and not existing_task.done():
+        return {"status": "warming"}
+
+    async with _backend_warmup_lock:
+        existing_task = app.state.backend_warmup_task
+        if existing_task and not existing_task.done():
+            return {"status": "warming"}
+
+        app.state.backend_warmup_task = asyncio.create_task(_run_backend_warmup())
+
+    return {"status": "scheduled"}
 
 @app.get("/api/projects")
 async def list_projects():
@@ -135,7 +192,7 @@ async def create_project(
             coding_api_base_source=model_coding_api_base_source or None,
             litellm_api_base=litellm_api_base or None,
         )
-
+    print("MODEL CONFIG FROM API:", mc)
     req = ProjectCreate(
         query=query, mode=project_mode,
         num_papers=max(1, min(20, num_papers)),
@@ -266,7 +323,7 @@ async def get_file(project_id: str, file_path: str):
 # ── Paper Generation ──────────────────────────────────────────────
 
 @app.post("/api/projects/{project_id}/paper")
-async def generate_paper(project_id: str, req: PaperRequest = None):
+async def generate_paper(project_id: str, req: PaperRequest | None = None):
     """Generate a comprehensive paper from project outputs."""
     project = manager.get_project(project_id)
     if not project:

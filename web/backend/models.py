@@ -82,7 +82,7 @@ class ModelConfig(BaseModel):
     local_api_base: Optional[str] = None  # base URL for local/ollama models
     planning_api_base_source: Optional[str] = None  # openai | anthropic | local
     review_api_base_source: Optional[str] = None  # openai | anthropic | local
-    coding_api_base_source: Optional[str] = None  # openai | anthropic | local
+    coding_api_base_source: Optional[str] = None  #  anthropic | local
     litellm_api_base: Optional[str] = None  # base URL for LiteLLM calls (planning/review/default)
 
 

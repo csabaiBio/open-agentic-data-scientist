@@ -244,6 +244,20 @@ The coding agent has access to 380+ scientific Skills automatically loaded from 
 3. **Autonomous Usage**: The agent decides which Skills to use based on the task
 4. **No Configuration**: No environment variables or setup required
 
+**Offline / Restricted Network Mode (Optional):**
+
+- If outbound network is blocked, set `DISABLE_NETWORK_ACCESS=1` to skip remote clone attempts.
+- To load skills offline, set `CLAUDE_SKILLS_SOURCE_PATH` to either:
+    - a local clone of `claude-scientific-skills` (repo root), or
+    - the `scientific-skills/` directory directly.
+
+Example:
+
+```bash
+DISABLE_NETWORK_ACCESS=1
+CLAUDE_SKILLS_SOURCE_PATH=/path/to/claude-scientific-skills
+```
+
 ## Tool Implementation Details
 
 ### Adding Custom Tools

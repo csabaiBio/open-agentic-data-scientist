@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Search, Clock, FileStack, Trash2, Loader2, Upload, X, Sparkles, Compass, Settings2, ChevronDown, ChevronUp, Cpu, Server, Coins } from 'lucide-react'
 import { fetchProjects, createProject, deleteProject } from '../api'
@@ -42,8 +42,87 @@ function inferApiBaseSourceFromModel(modelName: string): '' | 'openai' | 'anthro
   return ''
 }
 
+type DashboardConfigPayload = {
+  query: string
+  mode: ProjectMode
+  num_papers: number
+  days_back: number
+  planning_model: string
+  review_model: string
+  coding_model: string
+  model_openai_api_base: string
+  model_anthropic_api_base: string
+  model_local_api_base: string
+  planning_api_base_source: string
+  review_api_base_source: string
+  coding_api_base_source: string
+  model_openai_api_key: string
+  model_anthropic_api_key: string
+  model_local_api_key: string
+  max_cost_usd: number | null
+  base_project_id: string
+}
+
+const DASHBOARD_CONFIG_STORAGE_KEY = 'agenticds.dashboard.config.v1'
+
+function toYamlScalar(value: string | number | boolean | null): string {
+  if (value === null) return 'null'
+  if (typeof value === 'string') return JSON.stringify(value)
+  return String(value)
+}
+
+function dashboardConfigToYaml(config: DashboardConfigPayload): string {
+  const lines = [
+    '# Agentic Data Scientist Dashboard Config',
+    '# Note: uploaded files are not included in this config.',
+  ]
+
+  for (const [key, value] of Object.entries(config)) {
+    lines.push(`${key}: ${toYamlScalar(value as string | number | boolean | null)}`)
+  }
+
+  return `${lines.join('\n')}\n`
+}
+
+function parseYamlScalar(raw: string): string | number | boolean | null {
+  const value = raw.trim()
+  if (value === '' || value === 'null') return null
+  if (value === 'true') return true
+  if (value === 'false') return false
+  if (value.startsWith('"') || value.startsWith("'")) {
+    try {
+      return JSON.parse(value)
+    } catch {
+      return value.slice(1, -1)
+    }
+  }
+  if (/^-?\d+(\.\d+)?$/.test(value)) {
+    const num = Number(value)
+    if (Number.isFinite(num)) return num
+  }
+  return value
+}
+
+function parseDashboardYaml(yaml: string): Partial<DashboardConfigPayload> {
+  const parsed: Record<string, string | number | boolean | null> = {}
+  const lines = yaml.split(/\r?\n/)
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const idx = trimmed.indexOf(':')
+    if (idx <= 0) continue
+    const key = trimmed.slice(0, idx).trim()
+    const rawValue = trimmed.slice(idx + 1)
+    parsed[key] = parseYamlScalar(rawValue)
+  }
+
+  return parsed as Partial<DashboardConfigPayload>
+}
+
 export default function Dashboard() {
   const navigate = useNavigate()
+  const configUploadInputRef = useRef<HTMLInputElement | null>(null)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
@@ -59,7 +138,7 @@ export default function Dashboard() {
   const [codingModel, setCodingModel] = useState('')
   const [modelOpenaiApiBase, setModelOpenaiApiBase] = useState('')
   const [modelAnthropicApiBase, setModelAnthropicApiBase] = useState('')
-  const [modelLocalApiBase, setModelLocalApiBase] = useState('')
+  const [modelLocalApiBase, setModelLocalApiBase] = useState('http://localhost:11434')
   const [planningApiBaseSource, setPlanningApiBaseSource] = useState('')
   const [reviewApiBaseSource, setReviewApiBaseSource] = useState('')
   const [codingApiBaseSource, setCodingApiBaseSource] = useState('')
@@ -100,14 +179,14 @@ export default function Dashboard() {
   useEffect(() => {
     if (mode === 'simple') return
     if (planningApiBaseSource) return
-    const inferred = inferApiBaseSourceFromModel(planningModel || 'local/qwen3.5:27b')
+    const inferred = inferApiBaseSourceFromModel(planningModel)
     if (inferred) setPlanningApiBaseSource(inferred)
   }, [mode, planningModel, planningApiBaseSource])
 
   useEffect(() => {
     if (mode !== 'orchestrated') return
     if (reviewApiBaseSource) return
-    const inferred = inferApiBaseSourceFromModel(reviewModel || 'anthropic/claude-sonnet-4-5')
+    const inferred = inferApiBaseSourceFromModel(reviewModel)
     if (inferred) setReviewApiBaseSource(inferred)
   }, [mode, reviewModel, reviewApiBaseSource])
 
@@ -126,6 +205,127 @@ export default function Dashboard() {
       return Math.max(0, (nowMs - createdMs) / 1000)
     }
     return typeof project.duration === 'number' ? project.duration : null
+  }
+
+  const getCurrentDashboardConfig = useCallback((): DashboardConfigPayload => ({
+    query,
+    mode,
+    num_papers: numPapers,
+    days_back: daysBack,
+    planning_model: planningModel,
+    review_model: reviewModel,
+    coding_model: codingModel,
+    model_openai_api_base: modelOpenaiApiBase,
+    model_anthropic_api_base: modelAnthropicApiBase,
+    model_local_api_base: modelLocalApiBase,
+    planning_api_base_source: planningApiBaseSource,
+    review_api_base_source: reviewApiBaseSource,
+    coding_api_base_source: codingApiBaseSource,
+    model_openai_api_key: modelOpenaiApiKey,
+    model_anthropic_api_key: modelAnthropicApiKey,
+    model_local_api_key: modelLocalApiKey,
+    max_cost_usd: typeof maxCostUsd === 'number' ? maxCostUsd : null,
+    base_project_id: baseProjectId,
+  }), [
+    query,
+    mode,
+    numPapers,
+    daysBack,
+    planningModel,
+    reviewModel,
+    codingModel,
+    modelOpenaiApiBase,
+    modelAnthropicApiBase,
+    modelLocalApiBase,
+    planningApiBaseSource,
+    reviewApiBaseSource,
+    codingApiBaseSource,
+    modelOpenaiApiKey,
+    modelAnthropicApiKey,
+    modelLocalApiKey,
+    maxCostUsd,
+    baseProjectId,
+  ])
+
+  const applyDashboardConfig = useCallback((config: Partial<DashboardConfigPayload>) => {
+    if (typeof config.query === 'string') setQuery(config.query)
+    if (config.mode === 'orchestrated' || config.mode === 'simple' || config.mode === 'discovery') setMode(config.mode)
+    if (typeof config.num_papers === 'number' && Number.isFinite(config.num_papers)) {
+      setNumPapers(Math.max(1, Math.min(20, Math.round(config.num_papers))))
+    }
+    if (typeof config.days_back === 'number' && Number.isFinite(config.days_back)) {
+      setDaysBack(Math.max(1, Math.min(180, Math.round(config.days_back))))
+    }
+    if (typeof config.planning_model === 'string') setPlanningModel(config.planning_model)
+    if (typeof config.review_model === 'string') setReviewModel(config.review_model)
+    if (typeof config.coding_model === 'string') setCodingModel(config.coding_model)
+    if (typeof config.model_openai_api_base === 'string') setModelOpenaiApiBase(config.model_openai_api_base)
+    if (typeof config.model_anthropic_api_base === 'string') setModelAnthropicApiBase(config.model_anthropic_api_base)
+    if (typeof config.model_local_api_base === 'string') setModelLocalApiBase(config.model_local_api_base)
+    if (typeof config.planning_api_base_source === 'string') setPlanningApiBaseSource(config.planning_api_base_source)
+    if (typeof config.review_api_base_source === 'string') setReviewApiBaseSource(config.review_api_base_source)
+    if (typeof config.coding_api_base_source === 'string') setCodingApiBaseSource(config.coding_api_base_source)
+    if (typeof config.model_openai_api_key === 'string') setModelOpenaiApiKey(config.model_openai_api_key)
+    if (typeof config.model_anthropic_api_key === 'string') setModelAnthropicApiKey(config.model_anthropic_api_key)
+    if (typeof config.model_local_api_key === 'string') setModelLocalApiKey(config.model_local_api_key)
+    if (typeof config.max_cost_usd === 'number' && Number.isFinite(config.max_cost_usd)) {
+      setMaxCostUsd(Math.max(0, config.max_cost_usd))
+    } else if (config.max_cost_usd === null) {
+      setMaxCostUsd('')
+    }
+    if (typeof config.base_project_id === 'string') setBaseProjectId(config.base_project_id)
+  }, [])
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(DASHBOARD_CONFIG_STORAGE_KEY)
+      if (!raw) return
+      const config = JSON.parse(raw) as Partial<DashboardConfigPayload>
+      applyDashboardConfig(config)
+    } catch (e) {
+      console.error('Failed to restore dashboard config:', e)
+    }
+  }, [applyDashboardConfig])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(DASHBOARD_CONFIG_STORAGE_KEY, JSON.stringify(getCurrentDashboardConfig()))
+    } catch (e) {
+      console.error('Failed to persist dashboard config:', e)
+    }
+  }, [getCurrentDashboardConfig])
+
+  const handleDownloadConfigYaml = () => {
+    const yaml = dashboardConfigToYaml(getCurrentDashboardConfig())
+    const blob = new Blob([yaml], { type: 'application/x-yaml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = 'dashboard-config.yaml'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleUploadConfigYaml = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    try {
+      const text = await file.text()
+      const parsed = parseDashboardYaml(text)
+      applyDashboardConfig(parsed)
+      window.localStorage.setItem(
+        DASHBOARD_CONFIG_STORAGE_KEY,
+        JSON.stringify({ ...getCurrentDashboardConfig(), ...parsed }),
+      )
+    } catch (e) {
+      console.error('Failed to load dashboard config:', e)
+      alert('Failed to load config file. Please check YAML formatting.')
+    } finally {
+      event.target.value = ''
+    }
   }
 
   const handleCreate = async () => {
@@ -370,6 +570,27 @@ export default function Dashboard() {
               </button>
               {showModelSettings && (
                 <div className="px-4 pb-4 space-y-4 border-t border-gray-100 animate-fade-in">
+                  <div className="pt-3 flex items-center gap-2">
+                    <button
+                      onClick={handleDownloadConfigYaml}
+                      className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                    >
+                      Download YAML Config
+                    </button>
+                    <button
+                      onClick={() => configUploadInputRef.current?.click()}
+                      className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                    >
+                      Upload YAML Config
+                    </button>
+                    <input
+                      ref={configUploadInputRef}
+                      type="file"
+                      accept=".yaml,.yml,text/yaml,text/x-yaml"
+                      className="hidden"
+                      onChange={handleUploadConfigYaml}
+                    />
+                  </div>
                   <div className="pt-3 text-[11px] text-gray-500">
                     Provider is inferred from each model prefix (for example <span className="font-mono">openai/gpt-4o</span>, <span className="font-mono">anthropic/claude-sonnet-4-5</span>, <span className="font-mono">ollama/qwen3.5:27b</span>).
                   </div>
@@ -381,7 +602,7 @@ export default function Dashboard() {
                           Planning Model
                         </label>
                         <input
-                          value={planningModel || 'local/qwen3.5:27b'}
+                          value={planningModel}
                           onChange={e => setPlanningModel(e.target.value)}
                           placeholder="e.g. openai/gpt-4.1-mini"
                           className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
@@ -433,7 +654,7 @@ export default function Dashboard() {
                           Review Model
                         </label>
                         <input
-                          value={reviewModel || 'anthropic/claude-sonnet-4-5'}
+                          value={reviewModel}
                           onChange={e => setReviewModel(e.target.value)}
                           placeholder="e.g. anthropic/claude-sonnet-4-5"
                           className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
@@ -538,12 +759,27 @@ export default function Dashboard() {
                         OpenAI API Base URL
                       </label>
                       <input
-                        value={modelOpenaiApiBase || "https://api.openai.com/v1"}
+                        value={modelOpenaiApiBase}
                         onChange={e => setModelOpenaiApiBase(e.target.value)}
                         placeholder="https://api.openai.com/v1"
                         className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none font-mono"
                       />
                     </div>
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                          {[
+                            'https://api.openai.com/v1',
+                          ].map(m => (
+                            <button
+                              key={m}
+                              onClick={() => setModelOpenaiApiBase(m)}
+                              className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                                modelOpenaiApiBase === m ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-400 hover:text-gray-600'
+                              }`}
+                            >
+                              {m}
+                            </button>
+                          ))}
+                      </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">
                         OpenAI API Key <span className="text-gray-300">(optional)</span>
@@ -568,6 +804,21 @@ export default function Dashboard() {
                         className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none font-mono"
                       />
                     </div>
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                          {[
+                            'https://api.anthropic.com',
+                          ].map(m => (
+                            <button
+                              key={m}
+                              onClick={() => setModelAnthropicApiBase(m)}
+                              className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                                modelAnthropicApiBase === m ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-400 hover:text-gray-600'
+                              }`}
+                            >
+                              {m}
+                            </button>
+                          ))}
+                      </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">
                         API Key <span className="text-gray-300">(optional)</span>
@@ -586,12 +837,27 @@ export default function Dashboard() {
                         Local / Ollama API Base URL
                       </label>
                       <input
-                        value={modelLocalApiBase || 'http://localhost:11434'}
+                        value={modelLocalApiBase}
                         onChange={e => setModelLocalApiBase(e.target.value)}
                         placeholder="http://localhost:11434"
                         className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none font-mono"
                       />
                     </div>
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                          {[
+                            'http://localhost:11434',
+                          ].map(m => (
+                            <button
+                              key={m}
+                              onClick={() => setModelLocalApiBase(m)}
+                              className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+                                modelLocalApiBase === m ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-400 hover:text-gray-600'
+                              }`}
+                            >
+                              {m}
+                            </button>
+                          ))}
+                      </div>
 
                     <div>
                       <label className="block text-xs font-medium text-gray-500 mb-1">

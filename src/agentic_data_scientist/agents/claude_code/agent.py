@@ -179,9 +179,12 @@ async def _query_via_proactor(prompt, options):
 
 def setup_skills_directory(working_dir: str) -> None:
     """
-    Clone claude-scientific-skills repository and copy skills to .claude/skills/.
+    Set up claude-scientific-skills into .claude/skills/.
 
-    The repository contains a single 'scientific-skills' directory with all skills.
+    Resolution order:
+    1. Local override via CLAUDE_SKILLS_SOURCE_PATH
+    2. Skip clone when DISABLE_NETWORK_ACCESS is enabled
+    3. Clone from GitHub as fallback
 
     Parameters
     ----------
@@ -196,6 +199,47 @@ def setup_skills_directory(working_dir: str) -> None:
     skills_dir = working_path / ".claude" / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
 
+    def _copy_skills_from_source(source_path: Path) -> bool:
+        if not source_path.exists() or not source_path.is_dir():
+            return False
+
+        copied_any = False
+        for skill_dir in source_path.iterdir():
+            if not skill_dir.is_dir():
+                continue
+            dest_path = skills_dir / skill_dir.name
+            if dest_path.exists():
+                shutil.rmtree(dest_path)
+            shutil.copytree(skill_dir, dest_path)
+            copied_any = True
+
+        return copied_any
+
+    # Optional local override for offline/air-gapped setups
+    local_source_raw = os.getenv("CLAUDE_SKILLS_SOURCE_PATH", "").strip()
+    if local_source_raw:
+        local_source = Path(local_source_raw).expanduser()
+        # Accept either repo root (containing scientific-skills/) or direct skills dir
+        candidate_source = (
+            local_source / "scientific-skills"
+            if (local_source / "scientific-skills").exists()
+            else local_source
+        )
+        if _copy_skills_from_source(candidate_source):
+            logger.info(f"[Claude Code] Loaded skills from local source: {candidate_source}")
+            return
+        logger.warning(
+            f"[Claude Code] CLAUDE_SKILLS_SOURCE_PATH is set but no skill directories were found in {candidate_source}"
+        )
+
+    # Respect existing network disable toggle used by tool configuration
+    if is_network_disabled():
+        logger.info(
+            "[Claude Code] Network access is disabled (DISABLE_NETWORK_ACCESS=1); skipping skills clone. "
+            "Set CLAUDE_SKILLS_SOURCE_PATH to a local skills directory to enable skills offline."
+        )
+        return
+
     # Clone repo to temp directory
     with tempfile.TemporaryDirectory() as tmpdir:
         repo_url = "https://github.com/K-Dense-AI/claude-scientific-skills.git"
@@ -207,17 +251,8 @@ def setup_skills_directory(working_dir: str) -> None:
                 ["git", "clone", "--depth", "1", repo_url, str(tmp_repo)], check=True, capture_output=True, timeout=60
             )
 
-            # Copy scientific-skills directory
             source_path = tmp_repo / "scientific-skills"
-            if source_path.exists():
-                # Copy each skill directory
-                for skill_dir in source_path.iterdir():
-                    if skill_dir.is_dir():
-                        dest_path = skills_dir / skill_dir.name
-                        if dest_path.exists():
-                            shutil.rmtree(dest_path)
-                        shutil.copytree(skill_dir, dest_path)
-            else:
+            if not _copy_skills_from_source(source_path):
                 logger.warning(f"[Claude Code] scientific-skills directory not found in {tmp_repo}")
 
             logger.info(f"[Claude Code] Skills setup complete in {skills_dir}")
@@ -225,7 +260,14 @@ def setup_skills_directory(working_dir: str) -> None:
         except subprocess.TimeoutExpired:
             logger.warning("[Claude Code] Git clone timed out - skills may not be available")
         except subprocess.CalledProcessError as e:
-            logger.warning(f"[Claude Code] Failed to clone skills repo: {e.stderr.decode()}")
+            stderr = (e.stderr or b"").decode(errors="replace").strip()
+            if "Could not resolve host" in stderr or "Name or service not known" in stderr:
+                logger.info(
+                    "[Claude Code] Skills repo clone skipped due to DNS/network resolution failure. "
+                    "Continuing without optional skills. Set CLAUDE_SKILLS_SOURCE_PATH to use local skills offline."
+                )
+            else:
+                logger.warning(f"[Claude Code] Failed to clone skills repo: {stderr}")
         except Exception as e:
             logger.warning(f"[Claude Code] Error setting up skills: {e}")
 
@@ -347,9 +389,23 @@ class ClaudeCodeAgent(Agent):
             self._provider = (self._model_config.get("provider") or LLM_PROVIDER or "openai").strip().lower()
 
         # Resolve coding model from per-project config first, then provider defaults, then env.
-        model = resolve_model_name(self._model_config, role="coding")
+        # model = resolve_model_name(self._model_config, role="coding")
+        model = raw_coding_model.split("/")[-1] if "/" in raw_coding_model else raw_coding_model
+        print(f"Claude Code Agent model resolution: provider={self._provider}, selected_coding_base_source={selected_coding_base_source}, raw_coding_model={raw_coding_model}, resolved_model={model}")
         if not model:
             model = CODING_MODEL_NAME
+
+        # Re-infer provider from the fully-resolved model name in case it carries a
+        # provider prefix (e.g. CODING_MODEL=local/qwen3:27b but LLM_PROVIDER=openai).
+        inferred_from_model = _infer_provider_from_model_name(model)
+        if inferred_from_model and inferred_from_model != self._provider:
+            logger.info(
+                "[Claude Code] updating provider from %s to %s based on resolved model %s",
+                self._provider,
+                inferred_from_model,
+                model,
+            )
+            self._provider = inferred_from_model
 
         model = _normalize_model_for_claude_sdk(model, self._provider)
 

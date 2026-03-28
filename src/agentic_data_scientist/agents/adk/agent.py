@@ -428,7 +428,7 @@ def create_agent(
         import tempfile
 
         working_dir = tempfile.mkdtemp(prefix="agentic_ds_")
-
+    print(model_config)
     working_dir = Path(working_dir)
     working_dir.mkdir(parents=True, exist_ok=True)
 

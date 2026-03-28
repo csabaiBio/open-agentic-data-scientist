@@ -91,9 +91,9 @@ elif LLM_PROVIDER == "bedrock":
     REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
     CODING_MODEL_NAME = os.getenv("CODING_MODEL", "bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0")
 elif LLM_PROVIDER == "local":
-    DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "qwen-3:14b")
+    DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "local/qwen3:14b")
     REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
-    CODING_MODEL_NAME = os.getenv("CODING_MODEL", "qwen2.5-coder:14b")
+    CODING_MODEL_NAME = os.getenv("CODING_MODEL", "local/qwen3:27b")
 
 logger.info(f"[AgenticDS] DEFAULT_MODEL={DEFAULT_MODEL_NAME}")
 logger.info(f"[AgenticDS] REVIEW_MODEL={REVIEW_MODEL_NAME}")
@@ -290,7 +290,7 @@ def resolve_model_name(model_config: Optional[dict], role: str = "planning") -> 
             default_name = DEFAULT_MODEL_NAME
         return _normalize_model_name(LLM_PROVIDER, default_name)
 
-    provider = (model_config.get("provider") or LLM_PROVIDER).lower()
+    provider = (model_config.get("provider")) # or LLM_PROVIDER).lower()
     if role == "coding":
         model_name = model_config.get("coding_model", "")
     elif role == "review":
@@ -298,30 +298,30 @@ def resolve_model_name(model_config: Optional[dict], role: str = "planning") -> 
     else:
         model_name = model_config.get("planning_model", "")
 
-    if not model_name:
-        if role == "coding":
-            if provider == "openrouter":
-                model_name = "claude-sonnet-4-5"
-            elif provider == "anthropic":
-                model_name = "claude-sonnet-4-5"
-            elif provider == "openai":
-                model_name = "gpt-4.1-mini"
-            elif provider == "bedrock":
-                model_name = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-            elif provider == "local":
-                model_name = "qwen3-coder:30b"
-            else:
-                model_name = CODING_MODEL_NAME
-        elif role == "review":
-            model_name = REVIEW_MODEL_NAME
-        elif provider == "openrouter":
-            model_name = "anthropic/claude-sonnet-4-5"
-        elif provider == "anthropic":
-            model_name = "anthropic/claude-sonnet-4-5"
-        elif provider == "openai":
-            model_name = "openai/gpt-4.1-mini"
-        else:
-            model_name = DEFAULT_MODEL_NAME
+    # if not model_name:
+    #     if role == "coding":
+    #         if provider == "openrouter":
+    #             model_name = "claude-sonnet-4-5"
+    #         elif provider == "anthropic":
+    #             model_name = "claude-sonnet-4-5"
+    #         elif provider == "openai":
+    #             model_name = "gpt-4.1-mini"
+    #         elif provider == "bedrock":
+    #             model_name = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    #         elif provider == "local":
+    #             model_name = "local/qwen3:27b"
+    #         else:
+    #             model_name = CODING_MODEL_NAME
+    #     elif role == "review":
+    #         model_name = REVIEW_MODEL_NAME
+    #     elif provider == "openrouter":
+    #         model_name = "anthropic/claude-sonnet-4-5"
+    #     elif provider == "anthropic":
+    #         model_name = "anthropic/claude-sonnet-4-5"
+    #     elif provider == "openai":
+    #         model_name = "openai/gpt-4.1-mini"
+    #     else:
+    #         model_name = DEFAULT_MODEL_NAME
 
     return _normalize_model_name(provider, model_name)
 

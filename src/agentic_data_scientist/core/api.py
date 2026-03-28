@@ -107,6 +107,7 @@ class DataScientist:
     ):
         """Initialize Agentic Data Scientist core with configuration."""
         self.model_config = model_config
+        print("MCMCM", self.model_config)
         # Generate session ID
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         unique_id = uuid.uuid4().hex[:8]
@@ -191,6 +192,7 @@ class DataScientist:
                 working_dir=str(self.working_dir),
                 model_config=self.model_config,
             )
+            print(f"Created Claude Code Agent with model_config: {self.model_config}")
             self.agent = claude_agent
 
             # Create App with compression config (no caching for claude_code)
