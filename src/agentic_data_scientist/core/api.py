@@ -36,7 +36,7 @@ from agentic_data_scientist.core.events import (
 
 
 # Load environment variables
-load_dotenv(override=True)
+load_dotenv(override=False)
 
 logger = logging.getLogger(__name__)
 logging.getLogger("google_adk.google.adk.tools.base_authenticated_tool").setLevel(logging.ERROR)

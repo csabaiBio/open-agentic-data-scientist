@@ -461,32 +461,67 @@ export default function ProjectDetail() {
                     Model Config
                   </h3>
                   <div className="space-y-2 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="text-gray-500">Provider</span>
-                      <span className="font-medium text-gray-700 bg-indigo-50 px-2 py-0.5 rounded">
-                        {project.llm_config.provider === 'local' ? 'Local (HF/vLLM)' : project.llm_config.provider}
-                      </span>
-                    </div>
-                    {project.llm_config.planning_model && (
-                      <div className="flex items-center justify-between">
+                    {project.mode !== 'simple' && project.llm_config.planning_model && (
+                      <div className="flex items-center justify-between gap-2">
                         <span className="text-gray-500">Planning</span>
-                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]" title={project.llm_config.planning_model}>
-                          {project.llm_config.planning_model.split('/').pop()}
-                        </span>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          {project.llm_config.planning_provider && (
+                            <span className="font-medium text-gray-700 bg-indigo-50 px-2 py-0.5 rounded whitespace-nowrap">
+                              {project.llm_config.planning_provider === 'local' ? 'Local' : project.llm_config.planning_provider}
+                            </span>
+                          )}
+                          <span className="font-mono text-[10px] text-gray-600 truncate max-w-[140px]" title={project.llm_config.planning_model}>
+                            {project.llm_config.planning_model.split('/').pop()}
+                          </span>
+                        </div>
                       </div>
                     )}
-                    {project.llm_config.coding_model && (
-                      <div className="flex items-center justify-between">
+                    {project.mode !== 'simple' && project.llm_config.review_model && (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-gray-500">Review</span>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          {project.llm_config.review_provider && (
+                            <span className="font-medium text-gray-700 bg-indigo-50 px-2 py-0.5 rounded whitespace-nowrap">
+                              {project.llm_config.review_provider === 'local' ? 'Local' : project.llm_config.review_provider}
+                            </span>
+                          )}
+                          <span className="font-mono text-[10px] text-gray-600 truncate max-w-[140px]" title={project.llm_config.review_model}>
+                            {project.llm_config.review_model.split('/').pop()}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    {project.mode !== 'discovery' && project.llm_config.coding_model && (
+                      <div className="flex items-center justify-between gap-2">
                         <span className="text-gray-500">Coding</span>
-                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]" title={project.llm_config.coding_model}>
-                          {project.llm_config.coding_model.split('/').pop()}
-                        </span>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          {project.llm_config.coding_provider && (
+                            <span className="font-medium text-gray-700 bg-indigo-50 px-2 py-0.5 rounded whitespace-nowrap">
+                              {project.llm_config.coding_provider === 'local' ? 'Local' : project.llm_config.coding_provider}
+                            </span>
+                          )}
+                          <span className="font-mono text-[10px] text-gray-600 truncate max-w-[140px]" title={project.llm_config.coding_model}>
+                            {project.llm_config.coding_model.split('/').pop()}
+                          </span>
+                        </div>
                       </div>
                     )}
-                    {(project.llm_config.litellm_api_base || project.llm_config.api_base) && (
+                    {project.llm_config.openai_api_base && (
                       <div className="flex items-center justify-between">
-                        <span className="text-gray-500">LiteLLM Base</span>
-                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.litellm_api_base || project.llm_config.api_base}</span>
+                        <span className="text-gray-500">OpenAI Base</span>
+                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.openai_api_base}</span>
+                      </div>
+                    )}
+                    {project.llm_config.anthropic_api_base && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-500">Anthropic Base</span>
+                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.anthropic_api_base}</span>
+                      </div>
+                    )}
+                    {project.llm_config.local_api_base && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-500">Local Base</span>
+                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.local_api_base}</span>
                       </div>
                     )}
                   </div>

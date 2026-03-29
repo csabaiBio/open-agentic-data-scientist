@@ -37,7 +37,7 @@ from agentic_data_scientist.prompts import load_prompt
 
 
 # Load environment variables
-load_dotenv(override=True)
+load_dotenv(override=False)
 
 logger = logging.getLogger(__name__)
 

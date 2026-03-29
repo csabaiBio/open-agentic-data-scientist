@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Search, Clock, FileStack, Trash2, Loader2, Upload, X, Sparkles, Compass, Settings2, ChevronDown, ChevronUp, Cpu, Server, Coins } from 'lucide-react'
+import { Plus, Search, Clock, FileStack, Trash2, Loader2, Upload, X, Sparkles, Compass, Settings2, ChevronDown, ChevronUp, Cpu, Coins } from 'lucide-react'
 import { fetchProjects, createProject, deleteProject } from '../api'
 import type { ProjectSummary, ProjectMode } from '../types'
 import StatusBadge from '../components/StatusBadge'
@@ -164,7 +164,6 @@ export default function Dashboard() {
 
   useEffect(() => {
     const hasRunning = projects.some(p => p.status === 'running' || p.status === 'pending')
-    if (!hasRunning) return
     const interval = setInterval(load, 5000)
     return () => clearInterval(interval)
   }, [projects, load])
@@ -958,16 +957,12 @@ export default function Dashboard() {
                   {p.llm_config && (
                     <>
                       <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-medium">
-                          <Server className="w-2.5 h-2.5" />
-                          {p.llm_config.provider === 'local' ? 'Local' : p.llm_config.provider}
-                        </span>
                         {p.mode !== 'simple' && p.llm_config.planning_model && (
                           <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 font-mono" title="Planning model">
                             {p.llm_config.planning_model.split('/').pop()}
                           </span>
                         )}
-                        {p.mode == 'orchestrated' && p.llm_config.review_model && (
+                        {p.mode !== 'simple' && p.llm_config.review_model && (
                           <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 font-mono" title="Review model">
                             {p.llm_config.review_model.split('/').pop()}
                           </span>
@@ -990,8 +985,6 @@ export default function Dashboard() {
                           { label: 'OpenAI', value: p.llm_config.openai_api_base },
                           { label: 'Anthropic', value: p.llm_config.anthropic_api_base },
                           { label: 'Local', value: p.llm_config.local_api_base },
-                          { label: 'LiteLLM', value: p.llm_config.litellm_api_base },
-                          { label: 'Legacy', value: p.llm_config.api_base },
                         ].filter(item => !!item.value)
 
                         if (apiBases.length === 0) return null

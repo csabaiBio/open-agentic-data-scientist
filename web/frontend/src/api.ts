@@ -35,7 +35,6 @@ export interface CreateProjectOpts {
   modelPlanningApiBaseSource?: string
   modelReviewApiBaseSource?: string
   modelCodingApiBaseSource?: string
-  modelLitellmApiBase?: string
   modelOpenaiApiKey?: string
   modelAnthropicApiKey?: string
   modelLocalApiKey?: string
@@ -60,7 +59,6 @@ export async function createProject(opts: CreateProjectOpts): Promise<Project> {
   if (opts.modelPlanningApiBaseSource) form.append('model_planning_api_base_source', opts.modelPlanningApiBaseSource)
   if (opts.modelReviewApiBaseSource) form.append('model_review_api_base_source', opts.modelReviewApiBaseSource)
   if (opts.modelCodingApiBaseSource) form.append('model_coding_api_base_source', opts.modelCodingApiBaseSource)
-  if (opts.modelLitellmApiBase) form.append('model_litellm_api_base', opts.modelLitellmApiBase)
   if (opts.modelOpenaiApiKey) form.append('model_openai_api_key', opts.modelOpenaiApiKey)
   if (opts.modelAnthropicApiKey) form.append('model_anthropic_api_key', opts.modelAnthropicApiKey)
   if (opts.modelLocalApiKey) form.append('model_local_api_key', opts.modelLocalApiKey)

@@ -56,7 +56,7 @@ except ImportError:
 
 
 # Load environment variables
-load_dotenv(override=True)
+load_dotenv(override=False)
 
 logger = logging.getLogger(__name__)
 
@@ -607,6 +607,13 @@ Requirements:
 
             env = os.environ.copy()
             env["ANTHROPIC_MODEL"] = str(self.model)
+
+            # Claude SDK environments can use either ANTHROPIC_API_KEY or
+            # ANTHROPIC_AUTH_TOKEN depending on version/configuration.
+            if not env.get("ANTHROPIC_API_KEY") and env.get("ANTHROPIC_AUTH_TOKEN"):
+                env["ANTHROPIC_API_KEY"] = env["ANTHROPIC_AUTH_TOKEN"]
+            if not env.get("ANTHROPIC_AUTH_TOKEN") and env.get("ANTHROPIC_API_KEY"):
+                env["ANTHROPIC_AUTH_TOKEN"] = env["ANTHROPIC_API_KEY"]
 
             # Set Anthropic base URL override if provided in model config.
             selected_coding_base_source = (self._model_config.get("coding_api_base_source") or "").strip().lower()
