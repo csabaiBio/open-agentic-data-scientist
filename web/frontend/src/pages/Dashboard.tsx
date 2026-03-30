@@ -63,7 +63,39 @@ type DashboardConfigPayload = {
   base_project_id: string
 }
 
+type DashboardModelConfigCookie = Pick<DashboardConfigPayload,
+  | 'planning_model'
+  | 'review_model'
+  | 'coding_model'
+  | 'model_openai_api_base'
+  | 'model_anthropic_api_base'
+  | 'model_local_api_base'
+  | 'planning_api_base_source'
+  | 'review_api_base_source'
+  | 'coding_api_base_source'
+  | 'model_openai_api_key'
+  | 'model_anthropic_api_key'
+  | 'model_local_api_key'
+>
+
 const DASHBOARD_CONFIG_STORAGE_KEY = 'agenticds.dashboard.config.v1'
+const DASHBOARD_MODEL_CONFIG_COOKIE_KEY = 'agenticds.dashboard.model_config.v1'
+
+function getCookieValue(name: string): string | null {
+  const encodedName = `${name}=`
+  const entries = document.cookie ? document.cookie.split('; ') : []
+  for (const entry of entries) {
+    if (entry.startsWith(encodedName)) {
+      return entry.slice(encodedName.length)
+    }
+  }
+  return null
+}
+
+function setCookieValue(name: string, value: string, days = 365): void {
+  const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString()
+  document.cookie = `${name}=${value}; expires=${expires}; path=/; SameSite=Lax`
+}
 
 function toYamlScalar(value: string | number | boolean | null): string {
   if (value === null) return 'null'
@@ -246,6 +278,34 @@ export default function Dashboard() {
     baseProjectId,
   ])
 
+  const getCurrentModelConfigForCookie = useCallback((): DashboardModelConfigCookie => ({
+    planning_model: planningModel,
+    review_model: reviewModel,
+    coding_model: codingModel,
+    model_openai_api_base: modelOpenaiApiBase,
+    model_anthropic_api_base: modelAnthropicApiBase,
+    model_local_api_base: modelLocalApiBase,
+    planning_api_base_source: planningApiBaseSource,
+    review_api_base_source: reviewApiBaseSource,
+    coding_api_base_source: codingApiBaseSource,
+    model_openai_api_key: modelOpenaiApiKey,
+    model_anthropic_api_key: modelAnthropicApiKey,
+    model_local_api_key: modelLocalApiKey,
+  }), [
+    planningModel,
+    reviewModel,
+    codingModel,
+    modelOpenaiApiBase,
+    modelAnthropicApiBase,
+    modelLocalApiBase,
+    planningApiBaseSource,
+    reviewApiBaseSource,
+    codingApiBaseSource,
+    modelOpenaiApiKey,
+    modelAnthropicApiKey,
+    modelLocalApiKey,
+  ])
+
   const applyDashboardConfig = useCallback((config: Partial<DashboardConfigPayload>) => {
     if (typeof config.query === 'string') setQuery(config.query)
     if (config.mode === 'orchestrated' || config.mode === 'simple' || config.mode === 'discovery') setMode(config.mode)
@@ -270,7 +330,7 @@ export default function Dashboard() {
     if (typeof config.max_cost_usd === 'number' && Number.isFinite(config.max_cost_usd)) {
       setMaxCostUsd(Math.max(0, config.max_cost_usd))
     } else if (config.max_cost_usd === null) {
-      setMaxCostUsd('')
+      setMaxCostUsd(2.00)
     }
     if (typeof config.base_project_id === 'string') setBaseProjectId(config.base_project_id)
   }, [])
@@ -288,11 +348,31 @@ export default function Dashboard() {
 
   useEffect(() => {
     try {
+      const raw = getCookieValue(DASHBOARD_MODEL_CONFIG_COOKIE_KEY)
+      if (!raw) return
+      const parsed = JSON.parse(decodeURIComponent(raw)) as Partial<DashboardConfigPayload>
+      applyDashboardConfig(parsed)
+    } catch (e) {
+      console.error('Failed to restore dashboard model config cookie:', e)
+    }
+  }, [applyDashboardConfig])
+
+  useEffect(() => {
+    try {
       window.localStorage.setItem(DASHBOARD_CONFIG_STORAGE_KEY, JSON.stringify(getCurrentDashboardConfig()))
     } catch (e) {
       console.error('Failed to persist dashboard config:', e)
     }
   }, [getCurrentDashboardConfig])
+
+  useEffect(() => {
+    try {
+      const payload = getCurrentModelConfigForCookie()
+      setCookieValue(DASHBOARD_MODEL_CONFIG_COOKIE_KEY, encodeURIComponent(JSON.stringify(payload)))
+    } catch (e) {
+      console.error('Failed to persist dashboard model config cookie:', e)
+    }
+  }, [getCurrentModelConfigForCookie])
 
   const handleDownloadConfigYaml = () => {
     const yaml = dashboardConfigToYaml(getCurrentDashboardConfig())
@@ -370,20 +450,22 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900">Projects</h1>
-          <p className="text-sm text-gray-500 mt-1">Create and manage your data science analyses</p>
+      {/* Header — only shown when the project list is visible */}
+      {!showNew && (
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">Projects</h1>
+            <p className="text-sm text-gray-500 mt-1">Create and manage your data science analyses</p>
+          </div>
+          <button
+            onClick={() => setShowNew(true)}
+            className="flex items-center gap-2 px-4 py-2.5 bg-brand-600 text-white rounded-xl font-medium text-sm shadow-sm hover:bg-brand-700 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            New Project
+          </button>
         </div>
-        <button
-          onClick={() => setShowNew(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-brand-600 text-white rounded-xl font-medium text-sm shadow-sm hover:bg-brand-700 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          New Project
-        </button>
-      </div>
+      )}
 
       {/* New Project Panel */}
       {showNew && (
@@ -555,21 +637,31 @@ export default function Dashboard() {
               )}
             </div>
 
-            {/* Model Settings */}
-            <div className="border border-gray-200 rounded-xl overflow-hidden">
+            {/* Model Presets */}
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-xs text-gray-400 self-center">Presets:</span>
               <button
-                onClick={() => setShowModelSettings(!showModelSettings)}
-                className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                onClick={() => { setPlanningModel('openai/gpt-4.1-mini'); setReviewModel('anthropic/claude-sonnet-4-5'); setCodingModel('local/qwen3-coder:30b') }}
+                className="px-2.5 py-1 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-colors"
               >
-                <span className="flex items-center gap-2">
-                  <Settings2 className="w-4 h-4 text-gray-400" />
-                  Model Settings
-                </span>
-                {showModelSettings ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+                GPT plan · Claude review · Qwen code
               </button>
-              {showModelSettings && (
-                <div className="px-4 pb-4 space-y-4 border-t border-gray-100 animate-fade-in">
-                  <div className="pt-3 flex items-center gap-2">
+              <button
+                onClick={() => { setPlanningModel('anthropic/claude-sonnet-4-5'); setReviewModel('openai/gpt-4.1-mini'); setCodingModel('anthropic/claude-sonnet-4-5') }}
+                className="px-2.5 py-1 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-colors"
+              >
+                Claude plan · GPT review · Claude code
+              </button>
+              <button
+                onClick={() => { setPlanningModel('local/qwen3.5:27b'); setReviewModel('openai/gpt-4.1-mini'); setCodingModel('anthropic/claude-sonnet-4-5') }}
+                className="px-2.5 py-1 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-colors"
+              >
+                Qwen plan · GPT review · Claude code
+              </button>
+            </div>
+
+            {/* Model Settings */}
+            <div className="pt-3 flex items-center gap-2">
                     <button
                       onClick={handleDownloadConfigYaml}
                       className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50"
@@ -590,6 +682,45 @@ export default function Dashboard() {
                       onChange={handleUploadConfigYaml}
                     />
                   </div>
+
+            {/* Submit */}
+            <button
+              onClick={handleCreate}
+              disabled={!query.trim() || creating}
+              className={`w-full py-3 text-white rounded-xl font-medium text-sm shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 ${
+                mode === 'discovery'
+                  ? 'bg-violet-600 hover:bg-violet-700'
+                  : 'bg-brand-600 hover:bg-brand-700'
+              }`}
+            >
+              {creating ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  {mode === 'discovery' ? 'Starting discovery...' : 'Starting analysis...'}
+                </>
+              ) : (
+                <>
+                  {mode === 'discovery' ? <Compass className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+                  {mode === 'discovery' ? 'Start Discovery' : 'Start Analysis'}
+                </>
+              )}
+            </button>
+
+            <div className="border border-gray-200 rounded-xl overflow-hidden">
+              
+              <button
+                onClick={() => setShowModelSettings(!showModelSettings)}
+                className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <Settings2 className="w-4 h-4 text-gray-400" />
+                  Model Settings
+                </span>
+                {showModelSettings ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+              </button>
+              {showModelSettings && (
+                <div className="px-4 pb-4 space-y-4 border-t border-gray-100 animate-fade-in">
+                  
                   <div className="pt-3 text-[11px] text-gray-500">
                     Provider is inferred from each model prefix (for example <span className="font-mono">openai/gpt-4o</span>, <span className="font-mono">anthropic/claude-sonnet-4-5</span>, <span className="font-mono">ollama/qwen3.5:27b</span>).
                   </div>
@@ -647,7 +778,7 @@ export default function Dashboard() {
                       </div>
                     )}
 
-                    {mode !== 'simple' && mode !== 'discovery' && (
+                    {mode !== 'simple' && (
                       <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">
                           Review Model
@@ -899,29 +1030,6 @@ export default function Dashboard() {
                 </div>
               )}
             </div>
-
-            {/* Submit */}
-            <button
-              onClick={handleCreate}
-              disabled={!query.trim() || creating}
-              className={`w-full py-3 text-white rounded-xl font-medium text-sm shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 ${
-                mode === 'discovery'
-                  ? 'bg-violet-600 hover:bg-violet-700'
-                  : 'bg-brand-600 hover:bg-brand-700'
-              }`}
-            >
-              {creating ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  {mode === 'discovery' ? 'Starting discovery...' : 'Starting analysis...'}
-                </>
-              ) : (
-                <>
-                  {mode === 'discovery' ? <Compass className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
-                  {mode === 'discovery' ? 'Start Discovery' : 'Start Analysis'}
-                </>
-              )}
-            </button>
           </div>
         </div>
       )}

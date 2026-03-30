@@ -59,21 +59,26 @@ async def run_discovery(
     }
 
     planning_model_name: Optional[str] = None
+    planning_provider: Optional[str] = None
 
     # ── Initialize LLM (needed for search term extraction + synthesis) ──
     try:
         from agentic_data_scientist.agents.adk.utils import (
             DEFAULT_MODEL_NAME,
+            LLM_PROVIDER,
             create_litellm_model,
             create_litellm_model_from_config,
             resolve_model_name,
+            resolve_provider_for_role,
         )
 
         if model_config:
             planning_model_name = resolve_model_name(model_config, role="planning")
+            planning_provider = resolve_provider_for_role(model_config, role="planning")
             llm = create_litellm_model_from_config(model_config, role="planning", num_retries=3, timeout=120)
         else:
             planning_model_name = DEFAULT_MODEL_NAME
+            planning_provider = LLM_PROVIDER
             llm = create_litellm_model(DEFAULT_MODEL_NAME, num_retries=3, timeout=120)
     except Exception as e:
         _emit("error", f"Failed to initialize LLM: {e}")
@@ -86,7 +91,13 @@ async def run_discovery(
     })
 
     # Use LLM to extract multiple broader search queries
-    search_queries = await _extract_search_terms(llm, query, model_name=planning_model_name, emit=_emit)
+    search_queries = await _extract_search_terms(
+        llm,
+        query,
+        model_name=planning_model_name,
+        provider_override=planning_provider,
+        emit=_emit,
+    )
     _emit("discovery_phase",
           f"Trying {len(search_queries)} search strategies on PubMed...",
           {"phase": "searching", "phase_index": 0})
@@ -158,7 +169,7 @@ Using your own expert knowledge of the biomedical literature:
 
 4. **Why PubMed Returned No Results**: Briefly explain why the specific combination of terms may be too niche or novel for PubMed (e.g., very recent discovery, uncommon combination of gene + phenotype).
 
-**Important**: Clearly state at the top that this synthesis is based on AI knowledge, not on specific retrieved papers. Be scientifically accurate and cite known genes, pathways, and mechanisms by name.""", model_name=planning_model_name, emit=_emit)
+**Important**: Clearly state at the top that this synthesis is based on AI knowledge, not on specific retrieved papers. Be scientifically accurate and cite known genes, pathways, and mechanisms by name.""", model_name=planning_model_name, provider_override=planning_provider, emit=_emit)
     else:
         synthesis = await _llm_call(llm, f"""You are a research synthesis expert. Analyze these {len(papers)} recent scientific papers and provide a comprehensive synthesis.
 
@@ -174,7 +185,7 @@ Using your own expert knowledge of the biomedical literature:
 
 4. **Emerging Patterns**: What patterns or trends do you see forming across these papers?
 
-Be specific, cite paper PMIDs when referencing specific findings. Write in clear scientific prose.""", model_name=planning_model_name, emit=_emit)
+Be specific, cite paper PMIDs when referencing specific findings. Write in clear scientific prose.""", model_name=planning_model_name, provider_override=planning_provider, emit=_emit)
 
     result["synthesis"] = synthesis
     _emit("discovery_synthesis", synthesis, {"phase": "synthesis_complete", "phase_index": 3})
@@ -220,7 +231,7 @@ Outline 4-6 concrete analytical steps to test the hypothesis, including:
 - Data preprocessing
 - Statistical methods
 - Machine learning approaches if applicable
-- Validation strategy""", model_name=planning_model_name, emit=_emit)
+- Validation strategy""", model_name=planning_model_name, provider_override=planning_provider, emit=_emit)
 
     # Parse the response into components
     result["hypothesis"] = hypothesis_response
@@ -249,7 +260,7 @@ Write a single, comprehensive prompt (3-5 paragraphs) that:
 5. Mentions what would constitute a novel, publishable finding
 
 The prompt should be self-contained - an AI data scientist should be able to read it and know exactly what to do.
-Do NOT include any preamble like "Here is the prompt" - just write the research task directly.""", model_name=planning_model_name, emit=_emit)
+Do NOT include any preamble like "Here is the prompt" - just write the research task directly.""", model_name=planning_model_name, provider_override=planning_provider, emit=_emit)
 
     result["research_question"] = research_question
     result["analysis_prompt"] = research_question
@@ -269,6 +280,7 @@ async def _extract_search_terms(
     llm,
     user_query: str,
     model_name: Optional[str] = None,
+    provider_override: Optional[str] = None,
     emit: Optional[Callable] = None,
 ) -> List[str]:
     """Use the LLM to extract 3-5 PubMed search queries from a natural-language question.
@@ -295,7 +307,7 @@ async def _extract_search_terms(
 ## Output format:
 Return ONLY the 4 search queries, one per line, no numbering, no explanation, no quotes.
 """
-    raw = await _llm_call(llm, prompt, model_name=model_name, emit=emit)
+    raw = await _llm_call(llm, prompt, model_name=model_name, provider_override=provider_override, emit=emit)
 
     # Parse: one query per line, filter empties
     queries = [line.strip().strip('"').strip("'").strip('-').strip('1234567890.').strip()
@@ -340,7 +352,13 @@ def _format_papers_for_llm(papers: List[Paper], max_abstract_len: int = 800) -> 
     return "\n".join(parts)
 
 
-async def _llm_call(llm, prompt: str, model_name: Optional[str] = None, emit: Optional[Callable] = None) -> str:
+async def _llm_call(
+    llm,
+    prompt: str,
+    model_name: Optional[str] = None,
+    provider_override: Optional[str] = None,
+    emit: Optional[Callable] = None,
+) -> str:
     """Make an LLM call using the LiteLlm API and return the text response."""
     try:
         from google.adk.models.llm_request import LlmRequest
@@ -355,7 +373,9 @@ async def _llm_call(llm, prompt: str, model_name: Optional[str] = None, emit: Op
             "temperature": 0.3,
             "max_output_tokens": 4096,
         }
-        if LLM_PROVIDER not in ("bedrock", "anthropic"):
+        resolved_provider = (provider_override or LLM_PROVIDER or "openai").lower()
+        print("LLLM_PROVIDER:", resolved_provider)
+        if resolved_provider not in ("bedrock", "anthropic"):
             config_kwargs["top_p"] = 0.95
 
         llm_request = LlmRequest(
@@ -383,7 +403,7 @@ async def _llm_call(llm, prompt: str, model_name: Optional[str] = None, emit: Op
                 model_name=resolved_model,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=output_tokens,
-                provider_override=LLM_PROVIDER,
+                provider_override=resolved_provider,
                 cached_tokens=cached_input_tokens,
                 call_type="generate_content",
             )
@@ -393,7 +413,7 @@ async def _llm_call(llm, prompt: str, model_name: Optional[str] = None, emit: Op
                     resolved_model,
                     {
                         "model": resolved_model,
-                        "provider": LLM_PROVIDER,
+                        "provider": resolved_provider,
                         "cost_usd": cost_usd,
                         "usage": {
                             "prompt_tokens": prompt_tokens,

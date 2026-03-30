@@ -80,6 +80,31 @@ function formatUsd(value: number | null | undefined): string {
   }).format(amount)
 }
 
+function inferUsageStage(event: ProjectEvent): 'planning' | 'review' | 'coding' | null {
+  const metaStage = String(
+    event.metadata?.stage
+    || event.metadata?.role
+    || event.metadata?.llm_stage
+    || '',
+  ).toLowerCase()
+  const author = String(event.author || '').toLowerCase()
+  const model = String(event.metadata?.model || event.content || '').toLowerCase()
+
+  const reviewHints = ['review', 'reviewer', 'critic']
+  const codingHints = ['code', 'coding', 'claude']
+  const planningHints = ['plan', 'planning', 'orchestrator']
+
+  const hasAny = (text: string, hints: string[]) => hints.some(h => text.includes(h))
+
+  if (hasAny(metaStage, reviewHints) || hasAny(author, reviewHints)) return 'review'
+  if (hasAny(metaStage, codingHints) || hasAny(author, codingHints)) return 'coding'
+  if (hasAny(metaStage, planningHints) || hasAny(author, planningHints)) return 'planning'
+
+  if (model.includes('claude-code')) return 'coding'
+
+  return null
+}
+
 /* ── Markdown renderer with Tailwind prose classes ───────────── */
 
 function MarkdownContent({ content, className = '' }: { content: string; className?: string }) {
@@ -150,6 +175,7 @@ function EventCard({ event }: { event: ProjectEvent }) {
     const totalCostUsd = typeof event.metadata?.total_cost_usd === 'number' ? event.metadata.total_cost_usd : null
     const model = typeof event.metadata?.model === 'string' ? event.metadata.model : event.content
     const llmCallIndex = typeof event.metadata?.llm_call_index === 'number' ? event.metadata.llm_call_index : null
+    const usageStage = inferUsageStage(event)
 
     return (
       <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-100 animate-fade-in">
@@ -160,6 +186,11 @@ function EventCard({ event }: { event: ProjectEvent }) {
             {llmCallIndex !== null && (
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
                 Call {llmCallIndex}
+              </span>
+            )}
+            {usageStage && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-200 text-emerald-800 capitalize">
+                {usageStage}
               </span>
             )}
           </div>

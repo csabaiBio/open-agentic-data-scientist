@@ -744,7 +744,7 @@ Requirements:
             #
             # This mapping ensures proper event parsing and emission.
 
-            max_attempts = 2 if self._provider == "local" else 1
+            max_attempts = 2
             final_output_lines = []
 
             for attempt in range(max_attempts):

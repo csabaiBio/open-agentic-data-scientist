@@ -281,6 +281,8 @@ def resolve_provider_for_role(model_config: Optional[dict], role: str = "plannin
 
 def resolve_model_name(model_config: Optional[dict], role: str = "planning") -> str:
     """Resolve the effective model name for a given role and provider."""
+    role = (role or "planning").lower()
+
     if not model_config:
         if role == "coding":
             default_name = CODING_MODEL_NAME
@@ -290,11 +292,17 @@ def resolve_model_name(model_config: Optional[dict], role: str = "planning") -> 
             default_name = DEFAULT_MODEL_NAME
         return _normalize_model_name(LLM_PROVIDER, default_name)
 
-    provider = (model_config.get("provider")) # or LLM_PROVIDER).lower()
+    role_key = {
+        "planning": "planning_provider",
+        "review": "review_provider",
+        "coding": "coding_provider",
+    }.get(role)
+    provider = (model_config.get(role_key) or model_config.get("provider") or LLM_PROVIDER).lower()
+
     if role == "coding":
         model_name = model_config.get("coding_model", "")
     elif role == "review":
-        model_name = model_config.get("review_model", "") or model_config.get("planning_model", "")
+        model_name = model_config.get("review_model", "")
     else:
         model_name = model_config.get("planning_model", "")
 
@@ -322,6 +330,14 @@ def resolve_model_name(model_config: Optional[dict], role: str = "planning") -> 
     #         model_name = "openai/gpt-4.1-mini"
     #     else:
     #         model_name = DEFAULT_MODEL_NAME
+
+    if not model_name:
+        if role == "coding":
+            model_name = CODING_MODEL_NAME
+        elif role == "review":
+            model_name = REVIEW_MODEL_NAME
+        else:
+            model_name = DEFAULT_MODEL_NAME
 
     return _normalize_model_name(provider, model_name)
 
@@ -431,7 +447,7 @@ def _sanitize_openrouter_model(model_name: str) -> str:
     return sanitized
 
 
-def create_litellm_model(model_name: str, num_retries: int = 10, timeout: int = 300,
+def create_litellm_model(model_name: str, num_retries: int = 2, timeout: int = 300,
                          provider_override: Optional[str] = None, api_base_override: Optional[str] = None,
                          api_key_override: Optional[str] = None) -> LiteLlm:
     """
@@ -554,7 +570,7 @@ def create_litellm_model(model_name: str, num_retries: int = 10, timeout: int = 
 
 
 def create_litellm_model_from_config(model_config: dict, role: str = "planning",
-                                     num_retries: int = 10, timeout: int = 300) -> LiteLlm:
+                                     num_retries: int = 2, timeout: int = 300) -> LiteLlm:
     """
     Create a LiteLlm model from a project model_config dict.
 

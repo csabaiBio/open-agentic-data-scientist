@@ -199,6 +199,53 @@ export default function ProjectDetail() {
     }
   }
 
+  const handleDownloadProjectConfig = () => {
+    if (!project) return
+    const c = project.llm_config
+    const scalar = (v: string | number | boolean | null | undefined) => {
+      if (v === null || v === undefined) return 'null'
+      if (typeof v === 'string') return JSON.stringify(v)
+      return String(v)
+    }
+    const fields: Record<string, string | number | boolean | null | undefined> = {
+      query: project.query,
+      mode: project.mode,
+      num_papers: project.num_papers,
+      days_back: project.days_back,
+      planning_model: c?.planning_model ?? '',
+      review_model: c?.review_model ?? '',
+      coding_model: c?.coding_model ?? '',
+      model_openai_api_base: c?.openai_api_base ?? '',
+      model_anthropic_api_base: c?.anthropic_api_base ?? '',
+      model_local_api_base: c?.local_api_base ?? '',
+      planning_api_base_source: c?.planning_api_base_source ?? '',
+      review_api_base_source: c?.review_api_base_source ?? '',
+      coding_api_base_source: c?.coding_api_base_source ?? '',
+      model_openai_api_key: '',
+      model_anthropic_api_key: '',
+      model_local_api_key: '',
+      max_cost_usd: project.max_cost_usd,
+      base_project_id: '',
+    }
+    const lines = [
+      '# Agentic Data Scientist Dashboard Config',
+      `# Exported from project ${project.id}`,
+    ]
+    for (const [key, value] of Object.entries(fields)) {
+      lines.push(`${key}: ${scalar(value)}`)
+    }
+    const yaml = lines.join('\n') + '\n'
+    const blob = new Blob([yaml], { type: 'application/x-yaml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `project-${project.id.slice(0, 8)}-config.yaml`
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+  }
+
   const handleGeneratePaper = async () => {
     if (!id) return
     setGeneratingPaper(true)
@@ -452,13 +499,23 @@ export default function ProjectDetail() {
                   <BarChart3 className="w-4 h-4 text-brand-500" />
                   Stages
                 </h3>
+                
                 <StageProgress stages={project.stages} projectStartedAt={project.started_at} isRunning={isRunning} />
               </div>
               {project.llm_config && (
                 <div className="glass-card p-5">
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                    <Cpu className="w-4 h-4 text-indigo-500" />
-                    Model Config
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-2">
+                      <Cpu className="w-4 h-4 text-indigo-500" />
+                      Model Config
+                    </span>
+                    <button
+                      onClick={handleDownloadProjectConfig}
+                      title="Download YAML config"
+                      className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                    </button>
                   </h3>
                   <div className="space-y-2 text-xs">
                     {project.mode !== 'simple' && project.llm_config.planning_model && (
@@ -553,10 +610,7 @@ export default function ProjectDetail() {
         {tab === 'figures' && (
           <div className="lg:col-span-3">
             <div className="glass-card p-5">
-              <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
-                <Image className="w-4 h-4 text-brand-500" />
-                Generated Figures
-              </h3>
+                  
               <FigureGallery projectId={project.id} files={project.files} />
             </div>
           </div>
