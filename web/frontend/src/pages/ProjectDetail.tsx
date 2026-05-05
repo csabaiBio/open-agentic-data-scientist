@@ -215,15 +215,9 @@ export default function ProjectDetail() {
       planning_model: c?.planning_model ?? '',
       review_model: c?.review_model ?? '',
       coding_model: c?.coding_model ?? '',
-      model_openai_api_base: c?.openai_api_base ?? '',
-      model_anthropic_api_base: c?.anthropic_api_base ?? '',
-      model_local_api_base: c?.local_api_base ?? '',
-      planning_api_base_source: c?.planning_api_base_source ?? '',
-      review_api_base_source: c?.review_api_base_source ?? '',
-      coding_api_base_source: c?.coding_api_base_source ?? '',
-      model_openai_api_key: '',
-      model_anthropic_api_key: '',
-      model_local_api_key: '',
+      planning_api_base: c?.planning_api_base ?? '',
+      review_api_base: c?.review_api_base ?? '',
+      coding_api_base: c?.coding_api_base ?? '',
       max_cost_usd: project.max_cost_usd,
       base_project_id: '',
     }
@@ -563,22 +557,22 @@ export default function ProjectDetail() {
                         </div>
                       </div>
                     )}
-                    {project.llm_config.openai_api_base && (
+                    {project.llm_config.planning_api_base && (
                       <div className="flex items-center justify-between">
-                        <span className="text-gray-500">OpenAI Base</span>
-                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.openai_api_base}</span>
+                        <span className="text-gray-500">Planning Base</span>
+                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.planning_api_base}</span>
                       </div>
                     )}
-                    {project.llm_config.anthropic_api_base && (
+                    {project.llm_config.review_api_base && (
                       <div className="flex items-center justify-between">
-                        <span className="text-gray-500">Anthropic Base</span>
-                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.anthropic_api_base}</span>
+                        <span className="text-gray-500">Review Base</span>
+                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.review_api_base}</span>
                       </div>
                     )}
-                    {project.llm_config.local_api_base && (
+                    {project.llm_config.coding_api_base && (
                       <div className="flex items-center justify-between">
-                        <span className="text-gray-500">Local Base</span>
-                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.local_api_base}</span>
+                        <span className="text-gray-500">Coding Base</span>
+                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.coding_api_base}</span>
                       </div>
                     )}
                   </div>

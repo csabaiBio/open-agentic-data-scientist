@@ -1,8 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Search, Clock, FileStack, Trash2, Loader2, Upload, X, Sparkles, Compass, Settings2, ChevronDown, ChevronUp, Cpu, Coins } from 'lucide-react'
-import { fetchProjects, createProject, deleteProject } from '../api'
-import type { ProjectSummary, ProjectMode } from '../types'
+import { Plus, Search, Clock, FileStack, Trash2, Loader2, Upload, X, Sparkles, Compass, Settings2, ChevronDown, ChevronUp, Coins } from 'lucide-react'
+import {
+  fetchProjects,
+  createProject,
+  createLlmModel,
+  deleteLlmModel,
+  deleteProject,
+  fetchLlmModels,
+} from '../api'
+import type { LlmModel, LlmModelType, ProjectSummary, ProjectMode } from '../types'
 import StatusBadge from '../components/StatusBadge'
 
 function timeAgo(iso: string): string {
@@ -33,69 +40,19 @@ function formatUsd(value: number | null | undefined): string {
   }).format(amount)
 }
 
-function inferApiBaseSourceFromModel(modelName: string): '' | 'openai' | 'anthropic' | 'local' {
-  const model = (modelName || '').trim().toLowerCase()
-  if (!model) return ''
-  if (model.startsWith('openai/')) return 'openai'
-  if (model.startsWith('anthropic/')) return 'anthropic'
-  if (model.startsWith('local/') || model.startsWith('ollama/') || model.startsWith('huggingface/')) return 'local'
-  return ''
-}
-
 type DashboardConfigPayload = {
   query: string
   mode: ProjectMode
   num_papers: number
   days_back: number
-  planning_model: string
-  review_model: string
-  coding_model: string
-  model_openai_api_base: string
-  model_anthropic_api_base: string
-  model_local_api_base: string
-  planning_api_base_source: string
-  review_api_base_source: string
-  coding_api_base_source: string
-  model_openai_api_key: string
-  model_anthropic_api_key: string
-  model_local_api_key: string
   max_cost_usd: number | null
   base_project_id: string
+  planning_llm_model_id: number | null
+  review_llm_model_id: number | null
+  coding_llm_model_id: number | null
 }
-
-type DashboardModelConfigCookie = Pick<DashboardConfigPayload,
-  | 'planning_model'
-  | 'review_model'
-  | 'coding_model'
-  | 'model_openai_api_base'
-  | 'model_anthropic_api_base'
-  | 'model_local_api_base'
-  | 'planning_api_base_source'
-  | 'review_api_base_source'
-  | 'coding_api_base_source'
-  | 'model_openai_api_key'
-  | 'model_anthropic_api_key'
-  | 'model_local_api_key'
->
 
 const DASHBOARD_CONFIG_STORAGE_KEY = 'agenticds.dashboard.config.v1'
-const DASHBOARD_MODEL_CONFIG_COOKIE_KEY = 'agenticds.dashboard.model_config.v1'
-
-function getCookieValue(name: string): string | null {
-  const encodedName = `${name}=`
-  const entries = document.cookie ? document.cookie.split('; ') : []
-  for (const entry of entries) {
-    if (entry.startsWith(encodedName)) {
-      return entry.slice(encodedName.length)
-    }
-  }
-  return null
-}
-
-function setCookieValue(name: string, value: string, days = 365): void {
-  const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString()
-  document.cookie = `${name}=${value}; expires=${expires}; path=/; SameSite=Lax`
-}
 
 function toYamlScalar(value: string | number | boolean | null): string {
   if (value === null) return 'null'
@@ -165,18 +122,18 @@ export default function Dashboard() {
   const [numPapers, setNumPapers] = useState(10)
   const [daysBack, setDaysBack] = useState(30)
   const [showModelSettings, setShowModelSettings] = useState(false)
+  const [llmModels, setLlmModels] = useState<LlmModel[]>([])
+  const [llmModelsLoading, setLlmModelsLoading] = useState(false)
+  const [planningLlmModelId, setPlanningLlmModelId] = useState<number | ''>('')
+  const [reviewLlmModelId, setReviewLlmModelId] = useState<number | ''>('')
+  const [codingLlmModelId, setCodingLlmModelId] = useState<number | ''>('')
+  const [newLlmType, setNewLlmType] = useState<LlmModelType>('openai')
+  const [newLlmModelName, setNewLlmModelName] = useState('')
+  const [newLlmProviderUrl, setNewLlmProviderUrl] = useState('')
+  const [creatingLlmModel, setCreatingLlmModel] = useState(false)
   const [planningModel, setPlanningModel] = useState('')
   const [reviewModel, setReviewModel] = useState('')
   const [codingModel, setCodingModel] = useState('')
-  const [modelOpenaiApiBase, setModelOpenaiApiBase] = useState('')
-  const [modelAnthropicApiBase, setModelAnthropicApiBase] = useState('')
-  const [modelLocalApiBase, setModelLocalApiBase] = useState('http://localhost:11434')
-  const [planningApiBaseSource, setPlanningApiBaseSource] = useState('')
-  const [reviewApiBaseSource, setReviewApiBaseSource] = useState('')
-  const [codingApiBaseSource, setCodingApiBaseSource] = useState('')
-  const [modelOpenaiApiKey, setModelOpenaiApiKey] = useState('')
-  const [modelAnthropicApiKey, setModelAnthropicApiKey] = useState('')
-  const [modelLocalApiKey, setModelLocalApiKey] = useState('')
   const [maxCostUsd, setMaxCostUsd] = useState<number | ''>('')
   const [baseProjectId, setBaseProjectId] = useState<string>('')
   const [nowMs, setNowMs] = useState(Date.now())
@@ -192,7 +149,20 @@ export default function Dashboard() {
     }
   }, [])
 
+  const loadLlmModelRegistry = useCallback(async () => {
+    setLlmModelsLoading(true)
+    try {
+      const data = await fetchLlmModels()
+      setLlmModels(data)
+    } catch (e) {
+      console.error('Failed to load LLM models:', e)
+    } finally {
+      setLlmModelsLoading(false)
+    }
+  }, [])
+
   useEffect(() => { load() }, [load])
+  useEffect(() => { loadLlmModelRegistry() }, [loadLlmModelRegistry])
 
   useEffect(() => {
     const hasRunning = projects.some(p => p.status === 'running' || p.status === 'pending')
@@ -207,27 +177,6 @@ export default function Dashboard() {
     return () => clearInterval(interval)
   }, [projects])
 
-  useEffect(() => {
-    if (mode === 'simple') return
-    if (planningApiBaseSource) return
-    const inferred = inferApiBaseSourceFromModel(planningModel)
-    if (inferred) setPlanningApiBaseSource(inferred)
-  }, [mode, planningModel, planningApiBaseSource])
-
-  useEffect(() => {
-    if (mode !== 'orchestrated') return
-    if (reviewApiBaseSource) return
-    const inferred = inferApiBaseSourceFromModel(reviewModel)
-    if (inferred) setReviewApiBaseSource(inferred)
-  }, [mode, reviewModel, reviewApiBaseSource])
-
-  useEffect(() => {
-    if (mode === 'discovery') return
-    if (codingApiBaseSource) return
-    const inferred = inferApiBaseSourceFromModel(codingModel)
-    if (inferred) setCodingApiBaseSource(inferred)
-  }, [mode, codingModel, codingApiBaseSource])
-
   const getElapsedSeconds = (project: ProjectSummary): number | null => {
     if (project.status === 'running' || project.status === 'pending') {
       if (typeof project.duration === 'number' && project.duration >= 0) return project.duration
@@ -238,72 +187,70 @@ export default function Dashboard() {
     return typeof project.duration === 'number' ? project.duration : null
   }
 
+  const applySelectedModelToRole = useCallback((role: 'planning' | 'review' | 'coding', modelId: number | '') => {
+    if (role === 'planning') {
+      setPlanningLlmModelId(modelId)
+      setPlanningModel(typeof modelId === 'number' ? (llmModels.find(m => m.id === modelId)?.model_name ?? '') : '')
+    }
+    if (role === 'review') {
+      setReviewLlmModelId(modelId)
+      setReviewModel(typeof modelId === 'number' ? (llmModels.find(m => m.id === modelId)?.model_name ?? '') : '')
+    }
+    if (role === 'coding') {
+      setCodingLlmModelId(modelId)
+      setCodingModel(typeof modelId === 'number' ? (llmModels.find(m => m.id === modelId)?.model_name ?? '') : '')
+    }
+  }, [llmModels])
+
+  const handleCreateLlmModel = async () => {
+    const modelName = newLlmModelName.trim()
+    const providerUrl = newLlmProviderUrl.trim()
+    if (!modelName || !providerUrl) return
+
+    setCreatingLlmModel(true)
+    try {
+      const created = await createLlmModel({
+        type: newLlmType,
+        model_name: modelName,
+        provider_url: providerUrl,
+      })
+      setLlmModels(prev => [...prev, created].sort((a, b) => `${a.type}:${a.model_name}`.localeCompare(`${b.type}:${b.model_name}`)))
+      setNewLlmModelName('')
+      setNewLlmProviderUrl('')
+    } catch (e) {
+      console.error('Failed to create LLM model:', e)
+      alert('Failed to add LLM model')
+    } finally {
+      setCreatingLlmModel(false)
+    }
+  }
+
+  const handleDeleteLlmModel = async (modelId: number) => {
+    try {
+      await deleteLlmModel(modelId)
+      setLlmModels(prev => prev.filter(m => m.id !== modelId))
+      if (planningLlmModelId === modelId) setPlanningLlmModelId('')
+      if (reviewLlmModelId === modelId) setReviewLlmModelId('')
+      if (codingLlmModelId === modelId) setCodingLlmModelId('')
+    } catch (e) {
+      console.error('Failed to delete LLM model:', e)
+      alert('Failed to delete LLM model')
+    }
+  }
+
   const getCurrentDashboardConfig = useCallback((): DashboardConfigPayload => ({
     query,
     mode,
     num_papers: numPapers,
     days_back: daysBack,
-    planning_model: planningModel,
-    review_model: reviewModel,
-    coding_model: codingModel,
-    model_openai_api_base: modelOpenaiApiBase,
-    model_anthropic_api_base: modelAnthropicApiBase,
-    model_local_api_base: modelLocalApiBase,
-    planning_api_base_source: planningApiBaseSource,
-    review_api_base_source: reviewApiBaseSource,
-    coding_api_base_source: codingApiBaseSource,
-    model_openai_api_key: modelOpenaiApiKey,
-    model_anthropic_api_key: modelAnthropicApiKey,
-    model_local_api_key: modelLocalApiKey,
     max_cost_usd: typeof maxCostUsd === 'number' ? maxCostUsd : null,
     base_project_id: baseProjectId,
+    planning_llm_model_id: typeof planningLlmModelId === 'number' ? planningLlmModelId : null,
+    review_llm_model_id: typeof reviewLlmModelId === 'number' ? reviewLlmModelId : null,
+    coding_llm_model_id: typeof codingLlmModelId === 'number' ? codingLlmModelId : null,
   }), [
-    query,
-    mode,
-    numPapers,
-    daysBack,
-    planningModel,
-    reviewModel,
-    codingModel,
-    modelOpenaiApiBase,
-    modelAnthropicApiBase,
-    modelLocalApiBase,
-    planningApiBaseSource,
-    reviewApiBaseSource,
-    codingApiBaseSource,
-    modelOpenaiApiKey,
-    modelAnthropicApiKey,
-    modelLocalApiKey,
-    maxCostUsd,
-    baseProjectId,
-  ])
-
-  const getCurrentModelConfigForCookie = useCallback((): DashboardModelConfigCookie => ({
-    planning_model: planningModel,
-    review_model: reviewModel,
-    coding_model: codingModel,
-    model_openai_api_base: modelOpenaiApiBase,
-    model_anthropic_api_base: modelAnthropicApiBase,
-    model_local_api_base: modelLocalApiBase,
-    planning_api_base_source: planningApiBaseSource,
-    review_api_base_source: reviewApiBaseSource,
-    coding_api_base_source: codingApiBaseSource,
-    model_openai_api_key: modelOpenaiApiKey,
-    model_anthropic_api_key: modelAnthropicApiKey,
-    model_local_api_key: modelLocalApiKey,
-  }), [
-    planningModel,
-    reviewModel,
-    codingModel,
-    modelOpenaiApiBase,
-    modelAnthropicApiBase,
-    modelLocalApiBase,
-    planningApiBaseSource,
-    reviewApiBaseSource,
-    codingApiBaseSource,
-    modelOpenaiApiKey,
-    modelAnthropicApiKey,
-    modelLocalApiKey,
+    query, mode, numPapers, daysBack, maxCostUsd, baseProjectId,
+    planningLlmModelId, reviewLlmModelId, codingLlmModelId,
   ])
 
   const applyDashboardConfig = useCallback((config: Partial<DashboardConfigPayload>) => {
@@ -315,24 +262,15 @@ export default function Dashboard() {
     if (typeof config.days_back === 'number' && Number.isFinite(config.days_back)) {
       setDaysBack(Math.max(1, Math.min(180, Math.round(config.days_back))))
     }
-    if (typeof config.planning_model === 'string') setPlanningModel(config.planning_model)
-    if (typeof config.review_model === 'string') setReviewModel(config.review_model)
-    if (typeof config.coding_model === 'string') setCodingModel(config.coding_model)
-    if (typeof config.model_openai_api_base === 'string') setModelOpenaiApiBase(config.model_openai_api_base)
-    if (typeof config.model_anthropic_api_base === 'string') setModelAnthropicApiBase(config.model_anthropic_api_base)
-    if (typeof config.model_local_api_base === 'string') setModelLocalApiBase(config.model_local_api_base)
-    if (typeof config.planning_api_base_source === 'string') setPlanningApiBaseSource(config.planning_api_base_source)
-    if (typeof config.review_api_base_source === 'string') setReviewApiBaseSource(config.review_api_base_source)
-    if (typeof config.coding_api_base_source === 'string') setCodingApiBaseSource(config.coding_api_base_source)
-    if (typeof config.model_openai_api_key === 'string') setModelOpenaiApiKey(config.model_openai_api_key)
-    if (typeof config.model_anthropic_api_key === 'string') setModelAnthropicApiKey(config.model_anthropic_api_key)
-    if (typeof config.model_local_api_key === 'string') setModelLocalApiKey(config.model_local_api_key)
     if (typeof config.max_cost_usd === 'number' && Number.isFinite(config.max_cost_usd)) {
       setMaxCostUsd(Math.max(0, config.max_cost_usd))
     } else if (config.max_cost_usd === null) {
       setMaxCostUsd(2.00)
     }
     if (typeof config.base_project_id === 'string') setBaseProjectId(config.base_project_id)
+    if (typeof config.planning_llm_model_id === 'number' && Number.isFinite(config.planning_llm_model_id)) setPlanningLlmModelId(config.planning_llm_model_id)
+    if (typeof config.review_llm_model_id === 'number' && Number.isFinite(config.review_llm_model_id)) setReviewLlmModelId(config.review_llm_model_id)
+    if (typeof config.coding_llm_model_id === 'number' && Number.isFinite(config.coding_llm_model_id)) setCodingLlmModelId(config.coding_llm_model_id)
   }, [])
 
   useEffect(() => {
@@ -346,16 +284,6 @@ export default function Dashboard() {
     }
   }, [applyDashboardConfig])
 
-  useEffect(() => {
-    try {
-      const raw = getCookieValue(DASHBOARD_MODEL_CONFIG_COOKIE_KEY)
-      if (!raw) return
-      const parsed = JSON.parse(decodeURIComponent(raw)) as Partial<DashboardConfigPayload>
-      applyDashboardConfig(parsed)
-    } catch (e) {
-      console.error('Failed to restore dashboard model config cookie:', e)
-    }
-  }, [applyDashboardConfig])
 
   useEffect(() => {
     try {
@@ -366,13 +294,20 @@ export default function Dashboard() {
   }, [getCurrentDashboardConfig])
 
   useEffect(() => {
-    try {
-      const payload = getCurrentModelConfigForCookie()
-      setCookieValue(DASHBOARD_MODEL_CONFIG_COOKIE_KEY, encodeURIComponent(JSON.stringify(payload)))
-    } catch (e) {
-      console.error('Failed to persist dashboard model config cookie:', e)
+    if (llmModels.length === 0) return
+    if (typeof planningLlmModelId === 'number') {
+      const found = llmModels.find(m => m.id === planningLlmModelId)
+      if (found) setPlanningModel(found.model_name)
     }
-  }, [getCurrentModelConfigForCookie])
+    if (typeof reviewLlmModelId === 'number') {
+      const found = llmModels.find(m => m.id === reviewLlmModelId)
+      if (found) setReviewModel(found.model_name)
+    }
+    if (typeof codingLlmModelId === 'number') {
+      const found = llmModels.find(m => m.id === codingLlmModelId)
+      if (found) setCodingModel(found.model_name)
+    }
+  }, [llmModels])
 
   const handleDownloadConfigYaml = () => {
     const yaml = dashboardConfigToYaml(getCurrentDashboardConfig())
@@ -413,18 +348,9 @@ export default function Dashboard() {
     try {
       const project = await createProject({
         query, mode, files, numPapers, daysBack,
-        planningModel: planningModel || undefined,
-        reviewModel: reviewModel || undefined,
-        codingModel: codingModel || undefined,
-        modelOpenaiApiBase: modelOpenaiApiBase || undefined,
-        modelAnthropicApiBase: modelAnthropicApiBase || undefined,
-        modelLocalApiBase: modelLocalApiBase || undefined,
-        modelPlanningApiBaseSource: planningApiBaseSource || undefined,
-        modelReviewApiBaseSource: reviewApiBaseSource || undefined,
-        modelCodingApiBaseSource: codingApiBaseSource || undefined,
-        modelOpenaiApiKey: modelOpenaiApiKey || undefined,
-        modelAnthropicApiKey: modelAnthropicApiKey || undefined,
-        modelLocalApiKey: modelLocalApiKey || undefined,
+        planningLlmModelId: typeof planningLlmModelId === 'number' ? planningLlmModelId : undefined,
+        reviewLlmModelId: typeof reviewLlmModelId === 'number' ? reviewLlmModelId : undefined,
+        codingLlmModelId: typeof codingLlmModelId === 'number' ? codingLlmModelId : undefined,
         maxCostUsd: typeof maxCostUsd === 'number' && maxCostUsd > 0 ? maxCostUsd : undefined,
         baseProjectId: baseProjectId || undefined,
       })
@@ -483,9 +409,32 @@ export default function Dashboard() {
           <div className="space-y-4">
             {/* Query */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                {mode === 'discovery' ? 'Research Field or Question' : 'Research Question'}
-              </label>
+              <div className="mb-1.5 flex items-center justify-between gap-3">
+                <label className="block text-sm font-medium text-gray-700">
+                  {mode === 'discovery' ? 'Research Field or Question' : 'Research Question'}
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleDownloadConfigYaml}
+                    className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                  >
+                    Download YAML Config
+                  </button>
+                  <button
+                    onClick={() => configUploadInputRef.current?.click()}
+                    className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                  >
+                    Upload YAML Config
+                  </button>
+                  <input
+                    ref={configUploadInputRef}
+                    type="file"
+                    accept=".yaml,.yml,text/yaml,text/x-yaml"
+                    className="hidden"
+                    onChange={handleUploadConfigYaml}
+                  />
+                </div>
+              </div>
               <textarea
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -494,12 +443,34 @@ export default function Dashboard() {
                   : 'e.g., Analyze the differential expression patterns in this miRNA dataset...'}
                 className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-brand-400 focus:ring-2 focus:ring-brand-100 outline-none text-sm resize-none h-24 transition-all"
               />
+                        {/* Submit */}
+            <button
+              onClick={handleCreate}
+              disabled={!query.trim() || creating}
+              className={`w-full py-3 text-white rounded-xl font-medium text-sm shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 ${
+                mode === 'discovery'
+                  ? 'bg-violet-600 hover:bg-violet-700'
+                  : 'bg-brand-600 hover:bg-brand-700'
+              }`}
+            >
+              {creating ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  {mode === 'discovery' ? 'Starting discovery...' : 'Starting analysis...'}
+                </>
+              ) : (
+                <>
+                  {mode === 'discovery' ? <Compass className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+                  {mode === 'discovery' ? 'Start Discovery' : 'Start Analysis'}
+                </>
+              )}
+            </button>
             </div>
 
             {/* Mode */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Analysis Mode</label>
-              <div className="flex gap-3">
+              <div className="flex gap-4">
                 <button
                   onClick={() => setMode('orchestrated')}
                   className={`flex-1 px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
@@ -530,13 +501,43 @@ export default function Dashboard() {
                       : 'border-gray-200 text-gray-600 hover:border-gray-300'
                   }`}
                 >
-                  <div className="font-semibold flex items-center gap-1.5">
-                    <Compass className="w-3.5 h-3.5" />
+                  <div className="font-semibold">
                     Discovery
                   </div>
                   <div className="text-xs mt-0.5 opacity-70">PubMed literature + novel hypothesis</div>
                 </button>
-              </div>
+              
+                        {/* Files */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Input Files <span className="text-gray-400 font-normal">(optional)</span>
+              </label>
+              <label className="flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 border-dashed border-gray-200 hover:border-brand-300 cursor-pointer transition-colors bg-gray-50/50">
+                <Upload className="w-4 h-4 text-gray-400" />
+                <span className="text-sm text-gray-500">
+                  {files.length > 0 ? `${files.length} file(s) selected` : 'Click to upload files'}
+                </span>
+                <input
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => setFiles(Array.from(e.target.files || []))}
+                />
+              </label>
+              {files.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {files.map((f, i) => (
+                    <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 rounded-lg text-xs text-gray-600">
+                      {f.name}
+                      <button onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}>
+                        <X className="w-3 h-3 text-gray-400 hover:text-red-500" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            </div>
             </div>
 
             {/* Discovery Settings */}
@@ -580,33 +581,155 @@ export default function Dashboard() {
               </div>
             )}
 
-            {/* Files */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                Input Files <span className="text-gray-400 font-normal">(optional)</span>
-              </label>
-              <label className="flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 border-dashed border-gray-200 hover:border-brand-300 cursor-pointer transition-colors bg-gray-50/50">
-                <Upload className="w-4 h-4 text-gray-400" />
-                <span className="text-sm text-gray-500">
-                  {files.length > 0 ? `${files.length} file(s) selected` : 'Click to upload files'}
+            {/* Model Settings */}
+            <div className="border border-gray-200 rounded-xl overflow-hidden">
+              
+              <button
+                onClick={() => setShowModelSettings(!showModelSettings)}
+                className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <span className="flex items-center gap-2">
+                  <Settings2 className="w-4 h-4 text-gray-400" />
+                  Model Settings
                 </span>
-                <input
-                  type="file"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => setFiles(Array.from(e.target.files || []))}
-                />
-              </label>
-              {files.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {files.map((f, i) => (
-                    <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 rounded-lg text-xs text-gray-600">
-                      {f.name}
-                      <button onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}>
-                        <X className="w-3 h-3 text-gray-400 hover:text-red-500" />
-                      </button>
-                    </span>
-                  ))}
+                {showModelSettings ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+              </button>
+              {showModelSettings && (
+                <div className="px-4 pb-4 space-y-4 border-t border-gray-100 animate-fade-in">
+                  <div className="pt-3 text-[11px] text-gray-500">
+                    Models are stored in SQLite with three fields: type, model_name, and provider_url.
+                  </div>
+
+                  <div className="rounded-lg border border-gray-200 p-3 space-y-2">
+                    <div className="text-xs font-medium text-gray-600">Add LLM Model</div>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                      <select
+                        value={newLlmType}
+                        onChange={(e) => setNewLlmType(e.target.value as LlmModelType)}
+                        className="px-2.5 py-2 rounded-lg border border-gray-200 text-sm bg-white"
+                      >
+                        <option value="openai">openai</option>
+                        <option value="anthropic">anthropic</option>
+                        <option value="local">local</option>
+                      </select>
+                      <input
+                        value={newLlmProviderUrl}
+                        onChange={(e) => setNewLlmProviderUrl(e.target.value)}
+                        placeholder="provider_url"
+                        className="px-3 py-2 rounded-lg border border-gray-200 text-sm"
+                      />
+                      <input
+                        value={newLlmModelName}
+                        onChange={(e) => setNewLlmModelName(e.target.value)}
+                        placeholder="model_name"
+                        className="px-3 py-2 rounded-lg border border-gray-200 text-sm"
+                      />                    
+                      </div>
+                    <button
+                      onClick={handleCreateLlmModel}
+                      disabled={creatingLlmModel || !newLlmModelName.trim() || !newLlmProviderUrl.trim()}
+                      className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      {creatingLlmModel ? 'Adding...' : 'Add model'}
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {mode !== 'simple' && (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Planning Model</label>
+                        <select
+                          value={planningLlmModelId}
+                          onChange={(e) => applySelectedModelToRole('planning', e.target.value ? Number(e.target.value) : '')}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"
+                        >
+                          <option value="">Select planning model</option>
+                          {llmModels.map(model => (
+                            <option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    {mode !== 'simple' && (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Review Model</label>
+                        <select
+                          value={reviewLlmModelId}
+                          onChange={(e) => applySelectedModelToRole('review', e.target.value ? Number(e.target.value) : '')}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"
+                        >
+                          <option value="">Select review model</option>
+                          {llmModels.map(model => (
+                            <option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    {mode !== 'discovery' && (
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Coding Model</label>
+                        <select
+                          value={codingLlmModelId}
+                          onChange={(e) => applySelectedModelToRole('coding', e.target.value ? Number(e.target.value) : '')}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"
+                        >
+                          <option value="">Select coding model</option>
+                          {llmModels.map(model => (
+                            <option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="text-xs font-medium text-gray-500">Saved Models</div>
+                    {llmModelsLoading ? (
+                      <div className="text-xs text-gray-400">Loading models...</div>
+                    ) : llmModels.length === 0 ? (
+                      <div className="text-xs text-gray-400">No saved models yet.</div>
+                    ) : (
+                      <div className="space-y-1 max-h-44 overflow-auto">
+                        {llmModels.map(model => (
+                          <div key={model.id} className="flex items-center justify-between rounded-lg border border-gray-200 px-2.5 py-1.5">
+                            <div className="min-w-0">
+                              <div className="text-xs text-gray-700 truncate">{model.type} | {model.model_name}</div>
+                              <div className="text-[10px] text-gray-400 truncate">{model.provider_url}</div>
+                            </div>
+                            <button
+                              onClick={() => handleDeleteLlmModel(model.id)}
+                              className="text-[10px] text-red-500 hover:text-red-600 px-2 py-0.5 rounded"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                      Max Cost (USD) <span className="text-gray-300">(optional stop limit)</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={maxCostUsd}
+                      onChange={e => {
+                        const value = e.target.value
+                        setMaxCostUsd(value === '' ? '' : Math.max(0, Number(value)))
+                      }}
+                      placeholder="e.g. 2.50"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
+                    />
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      Project stops automatically once total LLM cost reaches this amount.
+                    </p>
+                  </div>
                 </div>
               )}
             </div>
@@ -623,10 +746,10 @@ export default function Dashboard() {
               >
                 <option value="">Start from scratch</option>
                 {projects
-                  .filter(p => p.status === 'completed')
+                  .filter(p => p.status !== 'running' && p.status !== 'pending')
                   .map(p => (
                     <option key={p.id} value={p.id}>
-                      {p.query.slice(0, 60)}{p.query.length > 60 ? '...' : ''} ({p.files_count} files)
+                      {p.query.slice(0, 60)}{p.query.length > 60 ? '...' : ''} (ID: {p.id}, {p.files_count} files)
                     </option>
                   ))}
               </select>
@@ -637,399 +760,7 @@ export default function Dashboard() {
               )}
             </div>
 
-            {/* Model Presets */}
-            <div className="flex flex-wrap gap-2 items-center">
-              <span className="text-xs text-gray-400 self-center">Presets:</span>
-              <button
-                onClick={() => { setPlanningModel('openai/gpt-4.1-mini'); setReviewModel('anthropic/claude-sonnet-4-5'); setCodingModel('local/qwen3-coder:30b') }}
-                className="px-2.5 py-1 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-colors"
-              >
-                GPT plan · Claude review · Qwen code
-              </button>
-              <button
-                onClick={() => { setPlanningModel('anthropic/claude-sonnet-4-5'); setReviewModel('openai/gpt-4.1-mini'); setCodingModel('anthropic/claude-sonnet-4-5') }}
-                className="px-2.5 py-1 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-colors"
-              >
-                Claude plan · GPT review · Claude code
-              </button>
-              <button
-                onClick={() => { setPlanningModel('local/qwen3.5:27b'); setReviewModel('openai/gpt-4.1-mini'); setCodingModel('anthropic/claude-sonnet-4-5') }}
-                className="px-2.5 py-1 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-colors"
-              >
-                Qwen plan · GPT review · Claude code
-              </button>
-            </div>
 
-            {/* Model Settings */}
-            <div className="pt-3 flex items-center gap-2">
-                    <button
-                      onClick={handleDownloadConfigYaml}
-                      className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50"
-                    >
-                      Download YAML Config
-                    </button>
-                    <button
-                      onClick={() => configUploadInputRef.current?.click()}
-                      className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50"
-                    >
-                      Upload YAML Config
-                    </button>
-                    <input
-                      ref={configUploadInputRef}
-                      type="file"
-                      accept=".yaml,.yml,text/yaml,text/x-yaml"
-                      className="hidden"
-                      onChange={handleUploadConfigYaml}
-                    />
-                  </div>
-
-            {/* Submit */}
-            <button
-              onClick={handleCreate}
-              disabled={!query.trim() || creating}
-              className={`w-full py-3 text-white rounded-xl font-medium text-sm shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 ${
-                mode === 'discovery'
-                  ? 'bg-violet-600 hover:bg-violet-700'
-                  : 'bg-brand-600 hover:bg-brand-700'
-              }`}
-            >
-              {creating ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  {mode === 'discovery' ? 'Starting discovery...' : 'Starting analysis...'}
-                </>
-              ) : (
-                <>
-                  {mode === 'discovery' ? <Compass className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
-                  {mode === 'discovery' ? 'Start Discovery' : 'Start Analysis'}
-                </>
-              )}
-            </button>
-
-            <div className="border border-gray-200 rounded-xl overflow-hidden">
-              
-              <button
-                onClick={() => setShowModelSettings(!showModelSettings)}
-                className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-              >
-                <span className="flex items-center gap-2">
-                  <Settings2 className="w-4 h-4 text-gray-400" />
-                  Model Settings
-                </span>
-                {showModelSettings ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
-              </button>
-              {showModelSettings && (
-                <div className="px-4 pb-4 space-y-4 border-t border-gray-100 animate-fade-in">
-                  
-                  <div className="pt-3 text-[11px] text-gray-500">
-                    Provider is inferred from each model prefix (for example <span className="font-mono">openai/gpt-4o</span>, <span className="font-mono">anthropic/claude-sonnet-4-5</span>, <span className="font-mono">ollama/qwen3.5:27b</span>).
-                  </div>
-
-                  <>
-                    {mode !== 'simple' && (
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">
-                          Planning Model
-                        </label>
-                        <input
-                          value={planningModel}
-                          onChange={e => setPlanningModel(e.target.value)}
-                          placeholder="e.g. openai/gpt-4.1-mini"
-                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
-                        />
-                        <div className="flex flex-wrap gap-1 mt-1.5">
-                          {[
-                            'openai/gpt-4.1-mini',
-                            'anthropic/claude-sonnet-4-5-20250929',
-                            'local/qwen3.5:27b',
-                            'local/qwen3-coder:30b',
-                            'local/qwen4:27b',
-                            'local/qwen4-coder:30b',
-                            'local/qwen2.5-coder:32b',
-                            'local/deepseek-r1:14b',
-                            'local/llama4-maverick:17b',
-                          ].map(m => (
-                            <button
-                              key={m}
-                              onClick={() => setPlanningModel(m)}
-                              className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
-                                planningModel === m ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-400 hover:text-gray-600'
-                              }`}
-                            >
-                              {m.split('/').pop()}
-                            </button>
-                          ))}
-                        </div>
-                        <div className="mt-2">
-                          <label className="block text-[10px] font-medium text-gray-400 mb-1">
-                            Planning API Base Source
-                          </label>
-                          <select
-                            value={planningApiBaseSource}
-                            onChange={e => setPlanningApiBaseSource(e.target.value)}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs bg-white focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
-                          >
-                            <option value="">Auto (from model provider)</option>
-                            <option value="openai">OpenAI API Base URL</option>
-                            <option value="anthropic">Anthropic API Base URL</option>
-                            <option value="local">Local / Ollama API Base URL</option>
-                          </select>
-                        </div>
-                      </div>
-                    )}
-
-                    {mode !== 'simple' && (
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">
-                          Review Model
-                        </label>
-                        <input
-                          value={reviewModel}
-                          onChange={e => setReviewModel(e.target.value)}
-                          placeholder="e.g. anthropic/claude-sonnet-4-5"
-                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
-                        />
-                        <div className="flex flex-wrap gap-1 mt-1.5">
-                          {[
-                            'openai/gpt-4.1-mini',
-                            'anthropic/claude-sonnet-4-5',
-                            'local/qwen3.5:27b',
-                            'local/qwen3-coder:30b',
-                            'local/qwen4:27b',
-                            'local/qwen4-coder:30b',
-                            'local/qwen2.5-coder:32b',
-                            'local/deepseek-r1:14b',
-                            'local/llama4-maverick:17b',
-                          ].map(m => (
-                            <button
-                              key={m}
-                              onClick={() => setReviewModel(m)}
-                              className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
-                                reviewModel === m ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-400 hover:text-gray-600'
-                              }`}
-                            >
-                              {m.split('/').pop()}
-                            </button>
-                          ))}
-                        </div>
-                        <div className="mt-2">
-                          <label className="block text-[10px] font-medium text-gray-400 mb-1">
-                            Review API Base Source
-                          </label>
-                          <select
-                            value={reviewApiBaseSource}
-                            onChange={e => setReviewApiBaseSource(e.target.value)}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs bg-white focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
-                          >
-                            <option value="">Auto (from model provider)</option>
-                            <option value="openai">OpenAI API Base URL</option>
-                            <option value="anthropic">Anthropic API Base URL</option>
-                            <option value="local">Local / Ollama API Base URL</option>
-                          </select>
-                        </div>
-                      </div>
-                    )}
-
-                    {mode !== 'discovery' && (
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">
-                          Coding Model <span className="text-gray-300">(Claude Code SDK)</span>
-                        </label>
-                        <input
-                          value={codingModel}
-                          onChange={e => setCodingModel(e.target.value)}
-                          placeholder="e.g. anthropic/claude-sonnet-4-5-20250929"
-                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
-                        />
-                        <div className="flex flex-wrap gap-1 mt-1.5">
-                          {[
-                            'anthropic/claude-sonnet-4-5',
-                            'local/qwen3.5:27b',
-                            'local/qwen3-coder:30b',
-                            'local/qwen4:27b',
-                            'local/qwen4-coder:30b',
-                            'local/qwen2.5-coder:32b',
-                            'local/deepseek-r1:14b',
-                            'local/llama4-maverick:17b',
-                          ].map(m => (
-                            <button
-                              key={m}
-                              onClick={() => setCodingModel(m)}
-                              className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
-                                codingModel === m ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-400 hover:text-gray-600'
-                              }`}
-                            >
-                              {m.split('/').pop()}
-                            </button>
-                          ))}
-                        </div>
-                        <p className="text-[10px] text-gray-400 mt-1">
-                          Coding uses Claude Code CLI; provider is inferred from the coding model prefix.
-                        </p>
-                        <div className="mt-2">
-                          <label className="block text-[10px] font-medium text-gray-400 mb-1">
-                            Coding API Base Source
-                          </label>
-                          <select
-                            value={codingApiBaseSource}
-                            onChange={e => setCodingApiBaseSource(e.target.value)}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-gray-200 text-xs bg-white focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
-                          >
-                            <option value="">Auto (from model provider)</option>
-                            <option value="openai">OpenAI API Base URL</option>
-                            <option value="anthropic">Anthropic API Base URL</option>
-                            <option value="local">Local / Ollama API Base URL</option>
-                          </select>
-                        </div>
-                      </div>
-                    )}
-
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">
-                        OpenAI API Base URL
-                      </label>
-                      <input
-                        value={modelOpenaiApiBase}
-                        onChange={e => setModelOpenaiApiBase(e.target.value)}
-                        placeholder="https://api.openai.com/v1"
-                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none font-mono"
-                      />
-                    </div>
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                          {[
-                            'https://api.openai.com/v1',
-                          ].map(m => (
-                            <button
-                              key={m}
-                              onClick={() => setModelOpenaiApiBase(m)}
-                              className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
-                                modelOpenaiApiBase === m ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-400 hover:text-gray-600'
-                              }`}
-                            >
-                              {m}
-                            </button>
-                          ))}
-                      </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">
-                        OpenAI API Key <span className="text-gray-300">(optional)</span>
-                      </label>
-                      <input
-                        type="password"
-                        value={modelOpenaiApiKey}
-                        onChange={e => setModelOpenaiApiKey(e.target.value)}
-                        placeholder="Leave empty for env default"
-                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">
-                        Anthropic API Base URL
-                      </label>
-                      <input
-                        value={modelAnthropicApiBase}
-                        onChange={e => setModelAnthropicApiBase(e.target.value)}
-                        placeholder="https://api.anthropic.com"
-                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none font-mono"
-                      />
-                    </div>
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                          {[
-                            'https://api.anthropic.com',
-                          ].map(m => (
-                            <button
-                              key={m}
-                              onClick={() => setModelAnthropicApiBase(m)}
-                              className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
-                                modelAnthropicApiBase === m ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-400 hover:text-gray-600'
-                              }`}
-                            >
-                              {m}
-                            </button>
-                          ))}
-                      </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">
-                        API Key <span className="text-gray-300">(optional)</span>
-                      </label>
-                      <input
-                        type="password"
-                        value={modelAnthropicApiKey}
-                        onChange={e => setModelAnthropicApiKey(e.target.value)}
-                        placeholder="Leave empty for env default"
-                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">
-                        Local / Ollama API Base URL
-                      </label>
-                      <input
-                        value={modelLocalApiBase}
-                        onChange={e => setModelLocalApiBase(e.target.value)}
-                        placeholder="http://localhost:11434"
-                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none font-mono"
-                      />
-                    </div>
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                          {[
-                            'http://localhost:11434',
-                          ].map(m => (
-                            <button
-                              key={m}
-                              onClick={() => setModelLocalApiBase(m)}
-                              className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
-                                modelLocalApiBase === m ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-400 hover:text-gray-600'
-                              }`}
-                            >
-                              {m}
-                            </button>
-                          ))}
-                      </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">
-                        Local/Ollama API Key <span className="text-gray-300">(optional)</span>
-                      </label>
-                      <input
-                        type="password"
-                        value={modelLocalApiKey}
-                        onChange={e => setModelLocalApiKey(e.target.value)}
-                        placeholder="Leave empty for env default"
-                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">
-                        Max Cost (USD) <span className="text-gray-300">(optional stop limit)</span>
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={maxCostUsd}
-                        onChange={e => {
-                          const value = e.target.value
-                          setMaxCostUsd(value === '' ? '' : Math.max(0, Number(value)))
-                        }}
-                        placeholder="e.g. 2.50"
-                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
-                      />
-                      <p className="text-[10px] text-gray-400 mt-1">
-                        Project stops automatically once total LLM cost reaches this amount.
-                      </p>
-                    </div>
-
-                    <p className="text-xs text-gray-400 pt-1">
-                      Provider is inferred per model from prefix; leave fields empty to use environment defaults.
-                    </p>
-                  </>
-                </div>
-              )}
-            </div>
           </div>
         </div>
       )}
@@ -1090,9 +821,9 @@ export default function Dashboard() {
 
                       {(() => {
                         const apiBases = [
-                          { label: 'OpenAI', value: p.llm_config.openai_api_base },
-                          { label: 'Anthropic', value: p.llm_config.anthropic_api_base },
-                          { label: 'Local', value: p.llm_config.local_api_base },
+                          { label: 'Planning API', value: p.llm_config.planning_api_base },
+                          { label: 'Review API', value: p.llm_config.review_api_base },
+                          { label: 'Coding API', value: p.llm_config.coding_api_base },
                         ].filter(item => !!item.value)
 
                         if (apiBases.length === 0) return null
