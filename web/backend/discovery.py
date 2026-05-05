@@ -65,20 +65,19 @@ async def run_discovery(
     try:
         from agentic_data_scientist.agents.adk.utils import (
             DEFAULT_MODEL_NAME,
-            LLM_PROVIDER,
             create_litellm_model,
             create_litellm_model_from_config,
             resolve_model_name,
-            resolve_provider_for_role,
+            resolve_provider_from_model_name,
         )
 
         if model_config:
             planning_model_name = resolve_model_name(model_config, role="planning")
-            planning_provider = resolve_provider_for_role(model_config, role="planning")
+            planning_provider = resolve_provider_from_model_name(planning_model_name)
             llm = create_litellm_model_from_config(model_config, role="planning", num_retries=3, timeout=120)
         else:
             planning_model_name = DEFAULT_MODEL_NAME
-            planning_provider = LLM_PROVIDER
+            planning_provider = resolve_provider_from_model_name(planning_model_name, fallback="openai")
             llm = create_litellm_model(DEFAULT_MODEL_NAME, num_retries=3, timeout=120)
     except Exception as e:
         _emit("error", f"Failed to initialize LLM: {e}")
@@ -365,15 +364,15 @@ async def _llm_call(
         from google.genai import types as genai_types
         from agentic_data_scientist.agents.adk.utils import (
             DEFAULT_MODEL_NAME,
-            LLM_PROVIDER,
             calculate_llm_cost,
+            resolve_provider_from_model_name,
         )
 
         config_kwargs = {
             "temperature": 0.3,
             "max_output_tokens": 4096,
         }
-        resolved_provider = (provider_override or LLM_PROVIDER or "openai").lower()
+        resolved_provider = (provider_override or resolve_provider_from_model_name(model_name or DEFAULT_MODEL_NAME, fallback="openai")).lower()
         print("LLLM_PROVIDER:", resolved_provider)
         if resolved_provider not in ("bedrock", "anthropic"):
             config_kwargs["top_p"] = 0.95

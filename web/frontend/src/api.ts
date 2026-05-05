@@ -1,4 +1,10 @@
-import type { Project, ProjectEvent, ProjectSummary } from './types'
+import type {
+  LlmModel,
+  LlmModelType,
+  Project,
+  ProjectEvent,
+  ProjectSummary,
+} from './types'
 
 const BASE = new URL('api/', `${window.location.origin}${import.meta.env.BASE_URL}`).pathname.replace(/\/$/, '')
 
@@ -26,18 +32,9 @@ export interface CreateProjectOpts {
   numPapers?: number
   daysBack?: number
   maxCostUsd?: number
-  planningModel?: string
-  reviewModel?: string
-  codingModel?: string
-  modelOpenaiApiBase?: string
-  modelAnthropicApiBase?: string
-  modelLocalApiBase?: string
-  modelPlanningApiBaseSource?: string
-  modelReviewApiBaseSource?: string
-  modelCodingApiBaseSource?: string
-  modelOpenaiApiKey?: string
-  modelAnthropicApiKey?: string
-  modelLocalApiKey?: string
+  planningLlmModelId?: number
+  reviewLlmModelId?: number
+  codingLlmModelId?: number
   baseProjectId?: string
 }
 
@@ -50,18 +47,9 @@ export async function createProject(opts: CreateProjectOpts): Promise<Project> {
   if (typeof opts.maxCostUsd === 'number' && opts.maxCostUsd > 0) {
     form.append('max_cost_usd', String(opts.maxCostUsd))
   }
-  if (opts.planningModel) form.append('planning_model', opts.planningModel)
-  if (opts.reviewModel) form.append('review_model', opts.reviewModel)
-  if (opts.codingModel) form.append('coding_model', opts.codingModel)
-  if (opts.modelOpenaiApiBase) form.append('model_openai_api_base', opts.modelOpenaiApiBase)
-  if (opts.modelAnthropicApiBase) form.append('model_anthropic_api_base', opts.modelAnthropicApiBase)
-  if (opts.modelLocalApiBase) form.append('model_local_api_base', opts.modelLocalApiBase)
-  if (opts.modelPlanningApiBaseSource) form.append('model_planning_api_base_source', opts.modelPlanningApiBaseSource)
-  if (opts.modelReviewApiBaseSource) form.append('model_review_api_base_source', opts.modelReviewApiBaseSource)
-  if (opts.modelCodingApiBaseSource) form.append('model_coding_api_base_source', opts.modelCodingApiBaseSource)
-  if (opts.modelOpenaiApiKey) form.append('model_openai_api_key', opts.modelOpenaiApiKey)
-  if (opts.modelAnthropicApiKey) form.append('model_anthropic_api_key', opts.modelAnthropicApiKey)
-  if (opts.modelLocalApiKey) form.append('model_local_api_key', opts.modelLocalApiKey)
+  if (opts.planningLlmModelId) form.append('planning_llm_model_id', String(opts.planningLlmModelId))
+  if (opts.reviewLlmModelId) form.append('review_llm_model_id', String(opts.reviewLlmModelId))
+  if (opts.codingLlmModelId) form.append('coding_llm_model_id', String(opts.codingLlmModelId))
   if (opts.baseProjectId) form.append('base_project_id', opts.baseProjectId)
   for (const f of opts.files) {
     form.append('files', f)
@@ -72,6 +60,30 @@ export async function createProject(opts: CreateProjectOpts): Promise<Project> {
     throw new Error(err || 'Failed to create project')
   }
   return res.json()
+}
+
+export async function fetchLlmModels(): Promise<LlmModel[]> {
+  const res = await fetch(`${BASE}/llm-models`)
+  if (!res.ok) throw new Error('Failed to fetch LLM models')
+  return res.json()
+}
+
+export async function createLlmModel(input: { type: LlmModelType; model_name: string; provider_url: string }): Promise<LlmModel> {
+  const res = await fetch(`${BASE}/llm-models`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(err || 'Failed to create LLM model')
+  }
+  return res.json()
+}
+
+export async function deleteLlmModel(id: number): Promise<void> {
+  const res = await fetch(`${BASE}/llm-models/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error('Failed to delete LLM model')
 }
 
 export async function stopProject(id: string): Promise<void> {

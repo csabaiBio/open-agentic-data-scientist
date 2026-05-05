@@ -31,6 +31,28 @@ class TestClaudeCodeAgent:
             assert agent._output_key == "custom_output"
             assert agent.model == "claude-sonnet-4-5-20250929"
 
+    def test_initialization_keeps_qwen_namespace_for_local_models(self):
+        """Namespaced local model IDs like Qwen/... must remain intact."""
+        agent = ClaudeCodeAgent(
+            model_config={
+                "coding_provider": "local",
+                "coding_model": "Qwen/Qwen3.6-35B-A3B-FP8",
+            }
+        )
+        assert agent.model == "Qwen/Qwen3.6-35B-A3B-FP8"
+
+    def test_initialization_preserves_private_local_routing_state(self):
+        """Private attrs must survive Agent base initialization for runtime routing."""
+        model_config = {
+            "coding_provider": "local",
+            "coding_model": "Qwen/Qwen3.6-35B-A3B-FP8",
+            "coding_api_base": "http://localhost:8000",
+        }
+        agent = ClaudeCodeAgent(model_config=model_config, working_dir="/tmp/test-session")
+        assert agent._provider == "local"
+        assert agent._model_config == model_config
+        assert agent._working_dir == "/tmp/test-session"
+
     def test_truncate_summary_short(self):
         """Test summary truncation with short text."""
         agent = ClaudeCodeAgent()

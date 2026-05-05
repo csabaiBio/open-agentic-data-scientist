@@ -22,12 +22,11 @@ from pydantic import PrivateAttr
 
 from agentic_data_scientist.agents.adk.utils import (
     is_network_disabled,
-    LLM_PROVIDER,
     CODING_MODEL_NAME,
     AWS_BEDROCK_API_KEY,
     AWS_REGION_NAME,
     resolve_model_name,
-    resolve_provider_for_role,
+    resolve_provider_from_model_name,
 )
 from agentic_data_scientist.agents.claude_code.templates import (
     get_claude_context,
@@ -372,44 +371,38 @@ class ClaudeCodeAgent(Agent):
         large files (>1MB), the agent will fail with a JSON buffer overflow error.
         Instructions are provided to Claude to avoid reading large files directly.
 
-        The model is determined by CODING_MODEL environment variable or detected from LLM_PROVIDER.
+        The model is determined by CODING_MODEL environment variable or resolved per-role.
         Bedrock requires a Bedrock-specific model ID; other providers use standard model names.
         """
-        self._model_config = model_config or {}
-        self._provider = resolve_provider_for_role(self._model_config, role="coding")
+        resolved_model_config = model_config or {}
+        raw_coding_model = str(resolved_model_config.get("coding_model") or "").strip()
+        resolved_coding_model = resolve_model_name(resolved_model_config, role="coding")
+        provider = resolve_provider_from_model_name(
+            resolved_coding_model,
+            fallback=(resolved_model_config.get("coding_provider") or "openai"),
+        ) or "openai"  # guard against empty string from legacy configs
 
-        raw_coding_model = str(self._model_config.get("coding_model") or "").strip()
-        selected_coding_base_source = (self._model_config.get("coding_api_base_source") or "").strip().lower()
-
-        if not self._provider and selected_coding_base_source in {"openai", "anthropic", "local"}:
-            self._provider = selected_coding_base_source
-        if not self._provider:
-            self._provider = _infer_provider_from_model_name(raw_coding_model)
-        if not self._provider:
-            self._provider = (self._model_config.get("provider") or LLM_PROVIDER or "openai").strip().lower()
-
-        # Resolve coding model from per-project config first, then provider defaults, then env.
-        # model = resolve_model_name(self._model_config, role="coding")
-        model = raw_coding_model.split("/")[-1] if "/" in raw_coding_model else raw_coding_model
-        print(f"Claude Code Agent model resolution: provider={self._provider}, selected_coding_base_source={selected_coding_base_source}, raw_coding_model={raw_coding_model}, resolved_model={model}")
+        # Keep the full model identifier; namespace segments like "Qwen/..." can be required.
+        model = resolved_coding_model
+        print(f"Claude Code Agent model resolution: provider={provider}, raw_coding_model={raw_coding_model}, resolved_model={model}")
         if not model:
             model = CODING_MODEL_NAME
 
         # Re-infer provider from the fully-resolved model name in case it carries a
-        # provider prefix (e.g. CODING_MODEL=local/qwen3:27b but LLM_PROVIDER=openai).
+        # provider prefix (e.g. CODING_MODEL=local/qwen3:27b).
         inferred_from_model = _infer_provider_from_model_name(model)
-        if inferred_from_model and inferred_from_model != self._provider:
+        if inferred_from_model and inferred_from_model != provider:
             logger.info(
                 "[Claude Code] updating provider from %s to %s based on resolved model %s",
-                self._provider,
+                provider,
                 inferred_from_model,
                 model,
             )
-            self._provider = inferred_from_model
+            provider = inferred_from_model
 
-        model = _normalize_model_for_claude_sdk(model, self._provider)
+        model = _normalize_model_for_claude_sdk(model, provider)
 
-        if self._provider == "bedrock" and AWS_BEDROCK_API_KEY and "/" not in model:
+        if provider == "bedrock" and AWS_BEDROCK_API_KEY and "/" not in model:
             model = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
         # Pass model to parent Agent class (it has a model field)
@@ -420,6 +413,8 @@ class ClaudeCodeAgent(Agent):
             after_agent_callback=after_agent_callback,
             **kwargs,
         )
+        self._model_config = resolved_model_config
+        self._provider = provider
         self._working_dir = working_dir
         self._output_key = output_key
 
@@ -468,29 +463,38 @@ class ClaudeCodeAgent(Agent):
         if not usage:
             return None
 
-        prompt_tokens = int(
+        def _to_non_negative_int(value: Any) -> int:
+            try:
+                return max(int(value or 0), 0)
+            except (TypeError, ValueError):
+                return 0
+
+        prompt_tokens = _to_non_negative_int(
             usage.get("input_tokens")
             or usage.get("prompt_tokens")
             or usage.get("inputTokens")
             or 0
         )
-        output_tokens = int(
+        output_tokens = _to_non_negative_int(
             usage.get("output_tokens")
             or usage.get("completion_tokens")
             or usage.get("outputTokens")
             or 0
         )
-        cached_tokens = int(
+        cached_tokens = _to_non_negative_int(
             usage.get("cache_read_input_tokens")
             or usage.get("cached_input_tokens")
             or usage.get("cacheReadInputTokens")
             or 0
         )
-        total_tokens = int(
+        total_tokens = _to_non_negative_int(
             usage.get("total_tokens")
             or usage.get("totalTokens")
             or (prompt_tokens + output_tokens)
         )
+
+        if total_tokens < (prompt_tokens + output_tokens):
+            total_tokens = prompt_tokens + output_tokens
 
         if total_tokens == 0 and prompt_tokens == 0 and output_tokens == 0 and cached_tokens == 0:
             return None
@@ -540,8 +544,12 @@ class ClaudeCodeAgent(Agent):
             else:
                 stage_info = ""
 
+            import time as _time
+            _t_run_start = _time.perf_counter()
+
             # Set up working directory
             setup_working_directory(working_dir)
+            logger.info("[TIMING] setup_working_directory: %.3fs", _time.perf_counter() - _t_run_start)
 
             # Yield starting event
             yield Event(
@@ -603,41 +611,54 @@ Requirements:
 5. Create final execution summary when done"""
 
             # Generate system instructions
+            _t_instructions = _time.perf_counter()
             system_instructions = get_claude_instructions(state=state, working_dir=working_dir)
+            logger.info("[TIMING] get_claude_instructions: %.3fs", _time.perf_counter() - _t_instructions)
 
             env = os.environ.copy()
             env["ANTHROPIC_MODEL"] = str(self.model)
 
-            # Claude SDK environments can use either ANTHROPIC_API_KEY or
-            # ANTHROPIC_AUTH_TOKEN depending on version/configuration.
-            if not env.get("ANTHROPIC_API_KEY") and env.get("ANTHROPIC_AUTH_TOKEN"):
-                env["ANTHROPIC_API_KEY"] = env["ANTHROPIC_AUTH_TOKEN"]
-            if not env.get("ANTHROPIC_AUTH_TOKEN") and env.get("ANTHROPIC_API_KEY"):
-                env["ANTHROPIC_AUTH_TOKEN"] = env["ANTHROPIC_API_KEY"]
+            # vLLM Claude Code integration expects these Anthropic default aliases
+            # to be mapped to the serving model name.
+            if self._provider == "local":
+                local_model_name = str(self.model)
+                env.setdefault("ANTHROPIC_DEFAULT_OPUS_MODEL", local_model_name)
+                env.setdefault("ANTHROPIC_DEFAULT_SONNET_MODEL", local_model_name)
+                env.setdefault("ANTHROPIC_DEFAULT_HAIKU_MODEL", local_model_name)
 
-            # Set Anthropic base URL override if provided in model config.
-            selected_coding_base_source = (self._model_config.get("coding_api_base_source") or "").strip().lower()
-            if selected_coding_base_source == "openai":
-                coding_api_base = self._model_config.get("openai_api_base")
-            elif selected_coding_base_source == "anthropic":
-                coding_api_base = self._model_config.get("anthropic_api_base")
-            elif selected_coding_base_source == "local":
-                coding_api_base = (
-                    self._model_config.get("local_api_base")
-                    or os.getenv("LOCAL_API_BASE")
-                    or os.getenv("OLLAMA_API_BASE")
-                    or os.getenv("OLLAMA_BASE_URL")
-                    or os.getenv("LOCAL_LLM_API_BASE")
-                    or "http://localhost:11434"
-                )
+            # Keep Claude SDK auth vars in sync using provider-specific source keys.
+            anthropic_api_key = os.getenv("ANTHROPIC_API_KEY") or ""
+            anthropic_auth_token = os.getenv("ANTHROPIC_AUTH_TOKEN") or ""
+            openai_api_key = os.getenv("OPENAI_API_KEY") or ""
+
+            if self._provider == "anthropic":
+                # Anthropic routes must use Anthropic credentials, never OpenAI keys.
+                selected_key = anthropic_api_key or anthropic_auth_token
+                if selected_key:
+                    env["ANTHROPIC_API_KEY"] = selected_key
+                    env["ANTHROPIC_AUTH_TOKEN"] = selected_key
             elif self._provider == "openai":
-                coding_api_base = self._model_config.get("openai_api_base") or self._model_config.get("coding_api_base")
-            elif self._provider == "anthropic":
-                coding_api_base = self._model_config.get("anthropic_api_base") or self._model_config.get("coding_api_base")
-            elif self._provider == "local":
+                # OpenAI-routed Claude Code uses OPENAI_API_KEY via SDK internals.
+                if openai_api_key:
+                    env["OPENAI_API_KEY"] = openai_api_key
+            else:
+                # Fallback sync for other providers that still use Anthropic-style auth.
+                if not env.get("ANTHROPIC_API_KEY") and env.get("ANTHROPIC_AUTH_TOKEN"):
+                    env["ANTHROPIC_API_KEY"] = env["ANTHROPIC_AUTH_TOKEN"]
+                if not env.get("ANTHROPIC_AUTH_TOKEN") and env.get("ANTHROPIC_API_KEY"):
+                    env["ANTHROPIC_AUTH_TOKEN"] = env["ANTHROPIC_API_KEY"]
+
+            # Set base URL override if provided in model config or environment.
+            # project_manager.py sets ANTHROPIC_BASE_URL/ANTHROPIC_API_BASE from
+            # the registry before launching, so always check env as fallback.
+            _env_api_base = (
+                os.getenv("ANTHROPIC_BASE_URL")
+                or os.getenv("ANTHROPIC_API_BASE")
+            )
+            if self._provider == "local":
                 coding_api_base = (
-                    self._model_config.get("local_api_base")
-                    or self._model_config.get("coding_api_base")
+                    self._model_config.get("coding_api_base")
+                    or _env_api_base
                     or os.getenv("LOCAL_API_BASE")
                     or os.getenv("OLLAMA_API_BASE")
                     or os.getenv("OLLAMA_BASE_URL")
@@ -645,7 +666,10 @@ Requirements:
                     or "http://localhost:11434"
                 )
             else:
-                coding_api_base = self._model_config.get("coding_api_base")
+                coding_api_base = (
+                    self._model_config.get("coding_api_base")
+                    or _env_api_base
+                )
             if coding_api_base:
                 logger.info(f"[Claude Code] Setting ANTHROPIC_BASE_URL for SDK: {coding_api_base}")
                 env["ANTHROPIC_BASE_URL"] = coding_api_base
@@ -653,15 +677,20 @@ Requirements:
                 if self._provider == "local":
                     env["ANTHROPIC_AUTH_TOKEN"] = "ollama"
 
+            logger.info("[TIMING] env+system_instructions build: %.3fs", _time.perf_counter() - _t_run_start)
+
             effective_api_base = env.get("ANTHROPIC_BASE_URL") or env.get("ANTHROPIC_API_BASE") or "<default>"
-            print(f"[Claude Code] SDK params model={self.model} api_base={effective_api_base} provider={self._provider}, coding_api_base={coding_api_base}, selected_coding_base_source={selected_coding_base_source}")
+            print(f"[Claude Code] SDK params model={self.model} api_base={effective_api_base} provider={self._provider}, coding_api_base={coding_api_base}")
             logger.info(
-                "[Claude Code] SDK params model=%s api_base=%s provider=%s, coding_api_base=%s, selected_coding_base_source=%s",
+                "[Claude Code] SDK params model=%s api_base=%s provider=%s, coding_api_base=%s "
+                "defaults(opus=%s sonnet=%s haiku=%s)",
                 self.model,
                 effective_api_base,
                 self._provider,
                 coding_api_base,
-                selected_coding_base_source,
+                env.get("ANTHROPIC_DEFAULT_OPUS_MODEL", ""),
+                env.get("ANTHROPIC_DEFAULT_SONNET_MODEL", ""),
+                env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL", ""),
             )
 
             # Ensure PATH includes common locations for the claude binary
@@ -700,6 +729,7 @@ Requirements:
             # Create options for Claude Agent SDK
             # Skills are loaded from .claude/skills/ via setting_sources
             # MCP servers are loaded from .claude/settings.json via setting_sources
+            _t_options = _time.perf_counter()
             options = ClaudeAgentOptions(
                 cwd=working_dir,
                 permission_mode="bypassPermissions",
@@ -716,6 +746,7 @@ Requirements:
                     )
                 },
             )
+            logger.info("[TIMING] ClaudeAgentOptions build: %.3fs", _time.perf_counter() - _t_options)
 
             yield Event(
                 author=self.name,
@@ -724,6 +755,7 @@ Requirements:
                     parts=[types.Part.from_text(text=f"Starting Claude Agent (coding mode) with model: {self.model}")],
                 ),
             )
+            logger.info("[TIMING] time to first SDK call: %.3fs", _time.perf_counter() - _t_run_start)
 
             # CRITICAL MAPPING: Claude Agent SDK → Google GenAI → ADK Events
             #
@@ -774,8 +806,13 @@ Requirements:
                     if sys.platform == "win32"
                     else query(prompt=attempt_prompt, options=options)
                 )
+                _t_sdk_start = _time.perf_counter()
+                _sdk_first_message_logged = False
                 try:
                     async for message in query_source:
+                        if not _sdk_first_message_logged:
+                            logger.info("[TIMING] SDK first message received: %.3fs", _time.perf_counter() - _t_sdk_start)
+                            _sdk_first_message_logged = True
                     # If we've already seen the final ResultMessage, ignore any subsequent messages
                     # and continue draining so the SDK can shut down its internal task group cleanly.
                         if received_final_result:
@@ -856,7 +893,7 @@ Requirements:
                                     usage_metadata=usage_metadata,
                                     custom_metadata={
                                         "model": getattr(message, 'model', str(self.model) if self.model else ""),
-                                        "provider": LLM_PROVIDER,
+                                        "provider": self._provider,
                                     },
                                 )
 

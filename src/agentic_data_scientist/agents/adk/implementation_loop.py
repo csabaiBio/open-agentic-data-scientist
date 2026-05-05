@@ -14,7 +14,11 @@ from google.genai import types
 from agentic_data_scientist.agents.adk.event_compression import create_compression_callback
 from agentic_data_scientist.agents.adk.loop_detection import LoopDetectionAgent
 from agentic_data_scientist.agents.adk.review_confirmation import create_review_confirmation_agent
-from agentic_data_scientist.agents.adk.utils import get_generate_content_config, get_review_model, resolve_provider_for_role
+from agentic_data_scientist.agents.adk.utils import (
+    get_generate_content_config,
+    get_review_model,
+    resolve_provider_for_role,
+)
 from agentic_data_scientist.prompts import load_prompt
 
 
@@ -75,8 +79,7 @@ def make_implementation_agents(working_dir: str, tools: list, model_config: dict
         (coding_agent, review_agent, review_confirmation_agent)
     """
     logger.info(f"[AgenticDS] Initializing implementation agents with {len(tools)} tools")
-    provider_for_config = (model_config or {}).get("provider") if model_config else None
-    review_provider_for_config = provider_for_config
+    review_provider_for_config = resolve_provider_for_role(model_config, role="review")
 
     # Always use ClaudeCodeAgent for coding
     from agentic_data_scientist.agents.claude_code import ClaudeCodeAgent
@@ -112,7 +115,6 @@ def make_implementation_agents(working_dir: str, tools: list, model_config: dict
     if model_config:
         from agentic_data_scientist.agents.adk.utils import create_litellm_model_from_config
         impl_review_model = create_litellm_model_from_config(model_config, role="review")
-        review_provider_for_config = resolve_provider_for_role(model_config, role="review")
     else:
         impl_review_model = get_review_model()
 

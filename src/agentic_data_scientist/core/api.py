@@ -20,9 +20,10 @@ from dotenv import load_dotenv
 from agentic_data_scientist.agents.adk.utils import (
     CODING_MODEL_NAME,
     DEFAULT_MODEL_NAME,
-    LLM_PROVIDER,
     calculate_llm_cost,
     resolve_model_name,
+    resolve_provider_for_role,
+    resolve_provider_from_model_name,
 )
 from agentic_data_scientist.core.events import (
     CompletedEvent,
@@ -147,23 +148,29 @@ class DataScientist:
 
     def _resolve_usage_model_name(self, author: Optional[str]) -> str:
         """Resolve the most likely model name for a streamed usage event."""
-        author_key = (author or "").lower()
-        is_coding_author = any(
-            key in author_key for key in ("code_agent", "claude", "coding")
-        )
+        role = self._resolve_usage_role(author)
 
         if self.model_config:
-            return resolve_model_name(
-                self.model_config,
-                role="coding" if is_coding_author else "planning",
-            )
+            return resolve_model_name(self.model_config, role=role)
 
-        return CODING_MODEL_NAME if is_coding_author else DEFAULT_MODEL_NAME
+        return CODING_MODEL_NAME if role == "coding" else DEFAULT_MODEL_NAME
+
+    def _resolve_usage_role(self, author: Optional[str]) -> str:
+        """Infer the model role that produced a streamed usage event."""
+        author_key = (author or "").lower()
+        if any(key in author_key for key in ("code_agent", "claude", "coding")):
+            return "coding"
+        if "review" in author_key:
+            return "review"
+        return "planning"
 
     async def _setup_agent(self):
         """Set up the agent and session service."""
         if self.agent is not None:
             return  # Already set up
+
+        import time as _time
+        _t_setup_start = _time.perf_counter()
 
         if self.config.agent_type == "adk":
             from agentic_data_scientist.agents.adk import create_app
@@ -185,17 +192,22 @@ class DataScientist:
             from google.adk.apps import App
             from google.adk.apps.app import EventsCompactionConfig
 
+            _t_import = _time.perf_counter()
             from agentic_data_scientist.agents.claude_code import ClaudeCodeAgent
+            logger.info("[TIMING] ClaudeCodeAgent import: %.3fs", _time.perf_counter() - _t_import)
 
             # Create claude code agent
+            _t_agent = _time.perf_counter()
             claude_agent = ClaudeCodeAgent(
                 working_dir=str(self.working_dir),
                 model_config=self.model_config,
             )
+            logger.info("[TIMING] ClaudeCodeAgent() constructor: %.3fs", _time.perf_counter() - _t_agent)
             print(f"Created Claude Code Agent with model_config: {self.model_config}")
             self.agent = claude_agent
 
             # Create App with compression config (no caching for claude_code)
+            _t_app = _time.perf_counter()
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=UserWarning, message=".*EventsCompactionConfig.*")
                 compression_config = EventsCompactionConfig(
@@ -209,13 +221,17 @@ class DataScientist:
                 root_agent=claude_agent,
                 events_compaction_config=compression_config,
             )
+            logger.info("[TIMING] App() creation: %.3fs", _time.perf_counter() - _t_app)
         else:
             raise ValueError(f"Unknown agent type: {self.config.agent_type}")
 
+        _t_runner_import = _time.perf_counter()
         from google.adk.runners import Runner
         from google.adk.sessions import InMemorySessionService
+        logger.info("[TIMING] Runner/Session import: %.3fs", _time.perf_counter() - _t_runner_import)
 
         # Create session service
+        _t_session = _time.perf_counter()
         self.session_service = InMemorySessionService()
 
         # Get app_name from app if available, otherwise use default
@@ -228,8 +244,10 @@ class DataScientist:
             session_id=self.session_id,
         )
         self.session = session
+        logger.info("[TIMING] Session creation: %.3fs", _time.perf_counter() - _t_session)
 
         # Create runner with App if available
+        _t_runner = _time.perf_counter()
         if self.app:
             self.runner = Runner(
                 app=self.app,  # Pass App instead of agent
@@ -242,7 +260,9 @@ class DataScientist:
                 app_name="agentic_data_scientist",
                 session_service=self.session_service,
             )
+        logger.info("[TIMING] Runner() creation: %.3fs", _time.perf_counter() - _t_runner)
 
+        logger.info("[TIMING] _setup_agent total: %.3fs", _time.perf_counter() - _t_setup_start)
         logger.info(f"Agent setup complete: {self.config.agent_type}")
 
     def save_files(self, files: List[tuple]) -> List[FileInfo]:
@@ -482,12 +502,19 @@ class DataScientist:
                     usage = event.usage_metadata
                     if isinstance(usage, types.GenerateContentResponseUsageMetadata):
                         custom_metadata = getattr(event, 'custom_metadata', {}) or {}
-                        prompt_tokens = usage.prompt_token_count or 0
-                        cached_input_tokens = usage.cached_content_token_count or 0
-                        output_tokens = usage.candidates_token_count or 0
-                        total_tokens = usage.total_token_count or (prompt_tokens + output_tokens)
-                        provider = custom_metadata.get("provider") or (self.model_config or {}).get("provider", LLM_PROVIDER)
+                        prompt_tokens = max(int(usage.prompt_token_count or 0), 0)
+                        cached_input_tokens = max(int(usage.cached_content_token_count or 0), 0)
+                        output_tokens = max(int(usage.candidates_token_count or 0), 0)
+                        total_tokens = max(int(usage.total_token_count or 0), 0)
+                        if total_tokens < (prompt_tokens + output_tokens):
+                            total_tokens = prompt_tokens + output_tokens
+                        usage_role = self._resolve_usage_role(getattr(event, 'author', 'agent'))
                         model_name = custom_metadata.get("model") or self._resolve_usage_model_name(getattr(event, 'author', 'agent'))
+                        provider = custom_metadata.get("provider") or (
+                            resolve_provider_for_role(self.model_config, role=usage_role)
+                            if self.model_config
+                            else resolve_provider_from_model_name(model_name, fallback="openai")
+                        )
                         usage_info = {
                             'prompt_tokens': prompt_tokens,
                             'cached_input_tokens': cached_input_tokens,
@@ -504,6 +531,8 @@ class DataScientist:
                                 cached_tokens=cached_input_tokens,
                                 call_type="generate_content",
                             )
+                        else:
+                            cost_usd = max(float(cost_usd or 0.0), 0.0)
                         usage_event = UsageEvent(
                             author=getattr(event, 'author', 'agent'),
                             model=model_name,

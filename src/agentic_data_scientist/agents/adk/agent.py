@@ -31,6 +31,7 @@ from agentic_data_scientist.agents.adk.utils import (
     get_generate_content_config,
     get_review_model,
     is_network_disabled,
+    resolve_model_name,
     resolve_provider_for_role,
 )
 from agentic_data_scientist.prompts import load_prompt
@@ -488,16 +489,15 @@ def create_agent(
 
     logger.info(f"[AgenticDS] Configured {len(tools)} local tools")
 
-    provider_for_config = (model_config or {}).get("provider") if model_config else None
-    review_provider_for_config = provider_for_config
+    planning_provider_for_config = resolve_provider_for_role(model_config, role="planning")
+    review_provider_for_config = resolve_provider_for_role(model_config, role="review")
 
     # Build custom models from model_config if provided
     if model_config:
         from agentic_data_scientist.agents.adk.utils import create_litellm_model_from_config
         planning_model = create_litellm_model_from_config(model_config, role="planning")
         review_model = create_litellm_model_from_config(model_config, role="review")
-        review_provider_for_config = resolve_provider_for_role(model_config, role="review")
-        logger.info(f"[AgenticDS] Using custom models from project config: provider={model_config.get('provider')}")
+        logger.info("[AgenticDS] Using custom model/api_base pairs from project config")
     else:
         planning_model = get_default_model()
         review_model = get_review_model()
@@ -535,7 +535,7 @@ def create_agent(
                 thinking_budget=-1,
             ),
         ),
-        generate_content_config=get_generate_content_config(temperature=0.3, provider_override=provider_for_config),
+        generate_content_config=get_generate_content_config(temperature=0.3, provider_override=planning_provider_for_config),
     )
 
     # ------------------------- High Level Planning Agents -------------------------
@@ -560,7 +560,7 @@ def create_agent(
                 thinking_budget=-1,
             ),
         ),
-        generate_content_config=get_generate_content_config(temperature=0.6, provider_override=provider_for_config),
+        generate_content_config=get_generate_content_config(temperature=0.6, provider_override=planning_provider_for_config),
         after_agent_callback=plan_maker_compression,
     )
 
@@ -620,7 +620,7 @@ def create_agent(
         output_schema=PLAN_PARSER_OUTPUT_SCHEMA,
         output_key="parsed_plan_output",
         after_agent_callback=plan_parser_callback,
-        generate_content_config=get_generate_content_config(temperature=0.0, provider_override=provider_for_config),
+        generate_content_config=get_generate_content_config(temperature=0.0, provider_override=planning_provider_for_config),
     )
 
     # ------------------------- Success Criteria Checker -------------------------
@@ -676,7 +676,7 @@ def create_agent(
         output_schema=STAGE_REFLECTOR_OUTPUT_SCHEMA,
         output_key="stage_reflector_output",
         after_agent_callback=combined_reflector_callback,
-        generate_content_config=get_generate_content_config(temperature=0.4, provider_override=provider_for_config),
+        generate_content_config=get_generate_content_config(temperature=0.4, provider_override=planning_provider_for_config),
     )
 
     # ------------------------- Stage Orchestrator -------------------------

@@ -37,6 +37,52 @@ function prettyAgentName(author: string): string {
     .trim() || author
 }
 
+function prettyToolName(toolName: string): string {
+  if (!toolName) return 'Tool'
+  return toolName
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/_/g, ' ')
+    .trim()
+}
+
+type TodoItem = {
+  activeForm?: string
+  content?: string
+  status?: string
+}
+
+function formatTodoWriteDetails(args: Record<string, unknown>): string {
+  const todosRaw = args.todos
+  if (!Array.isArray(todosRaw)) return ''
+
+  const todos = todosRaw.filter((item): item is TodoItem => typeof item === 'object' && item !== null)
+  if (todos.length === 0) return ''
+
+  const statusCounts = todos.reduce<Record<string, number>>((acc, t) => {
+    const key = typeof t.status === 'string' && t.status.trim() ? t.status.trim() : 'unknown'
+    acc[key] = (acc[key] || 0) + 1
+    return acc
+  }, {})
+
+  const statusSummary = Object.entries(statusCounts)
+    .map(([status, count]) => `${count} ${status.replace(/_/g, ' ')}`)
+    .join(', ')
+
+  const preview = todos
+    .slice(0, 4)
+    .map((t, idx) => {
+      const text = typeof t.activeForm === 'string' && t.activeForm.trim()
+        ? t.activeForm.trim()
+        : (typeof t.content === 'string' ? t.content.trim() : '')
+      const status = typeof t.status === 'string' && t.status.trim() ? ` [${t.status}]` : ''
+      return text ? `${idx + 1}. ${text}${status}` : ''
+    })
+    .filter(Boolean)
+
+  const more = todos.length > preview.length ? `\n+${todos.length - preview.length} more` : ''
+  return `Updated todo list (${todos.length} items${statusSummary ? `: ${statusSummary}` : ''})\n${preview.join('\n')}${more}`
+}
+
 function formatToolCallDetails(event: ProjectEvent): string {
   const args = event.metadata?.arguments || {}
 
@@ -61,6 +107,10 @@ function formatToolCallDetails(event: ProjectEvent): string {
   if (event.content === 'Write') {
     const filePath = typeof args.file_path === 'string' ? args.file_path : ''
     return filePath || ''
+  }
+
+  if (event.content === 'TodoWrite') {
+    return formatTodoWriteDetails(args)
   }
 
   const entries = Object.entries(args)
@@ -145,7 +195,7 @@ function EventCard({ event }: { event: ProjectEvent }) {
       <div className="flex items-start gap-2 px-3 py-1.5 rounded-lg bg-gray-50/60 text-xs text-gray-500 font-mono animate-fade-in">
         <Terminal className="w-3 h-3 text-cyan-400 flex-shrink-0 mt-0.5" />
         <div className="min-w-0">
-          <span className="text-cyan-700 font-medium">{event.content}</span>
+          <span className="text-cyan-700 font-medium">{prettyToolName(event.content)}</span>
           {detail && (
             <div className="text-gray-500 mt-0.5 break-all whitespace-pre-wrap">
               {detail}

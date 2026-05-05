@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from dotenv import load_dotenv
@@ -65,35 +66,11 @@ def _maybe_enable_litellm_debug() -> None:
     except Exception as e:
         logger.warning("[LiteLLM] Failed to enable debug logging: %s", e)
 
-# Configure LLM provider
-# Supported providers: "bedrock", "openrouter", "openai", "anthropic", "local"
-# Auto-detected from available API keys if LLM_PROVIDER is not set.
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
-DEFAULT_MODEL_NAME = "gpt-4.1-mini"
-REVIEW_MODEL_NAME = "gpt-4.1-mini"
-CODING_MODEL_NAME = "gpt-4.1-mini"
+# Model/provider routing is resolved per role and per model name at runtime.
 
-# Model configuration
-if LLM_PROVIDER == "openai":
-    DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "gpt-4.1-mini")
-    REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
-    CODING_MODEL_NAME = os.getenv("CODING_MODEL", "gpt-4.1-mini")
-elif LLM_PROVIDER == "anthropic":
-    DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "claude-sonnet-4-5")
-    REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
-    CODING_MODEL_NAME = os.getenv("CODING_MODEL", "claude-sonnet-4-5")
-elif LLM_PROVIDER == "openrouter":
-    DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "anthropic/claude-sonnet-4-5")
-    REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
-    CODING_MODEL_NAME = os.getenv("CODING_MODEL", "claude-sonnet-4-5")
-elif LLM_PROVIDER == "bedrock":
-    DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0")
-    REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
-    CODING_MODEL_NAME = os.getenv("CODING_MODEL", "bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0")
-elif LLM_PROVIDER == "local":
-    DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "local/qwen3:14b")
-    REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
-    CODING_MODEL_NAME = os.getenv("CODING_MODEL", "local/qwen3:27b")
+DEFAULT_MODEL_NAME = os.getenv("DEFAULT_MODEL", "gpt-4.1-mini")
+REVIEW_MODEL_NAME = os.getenv("REVIEW_MODEL", DEFAULT_MODEL_NAME)
+CODING_MODEL_NAME = os.getenv("CODING_MODEL", DEFAULT_MODEL_NAME)
 
 logger.info(f"[AgenticDS] DEFAULT_MODEL={DEFAULT_MODEL_NAME}")
 logger.info(f"[AgenticDS] REVIEW_MODEL={REVIEW_MODEL_NAME}")
@@ -125,20 +102,9 @@ LOCAL_ENABLE_AUTO_TOOL_CHOICE = os.getenv("LOCAL_ENABLE_AUTO_TOOL_CHOICE", "fals
 AWS_BEDROCK_API_KEY = os.getenv("AWS_BEDROCK_API_KEY") or os.getenv("AWS_BEARER_TOKEN_BEDROCK")
 AWS_REGION_NAME = os.getenv("AWS_REGION_NAME", "us-east-1")
 
-# Auto-detect provider if not explicitly set
-if not LLM_PROVIDER:
-    if AWS_BEDROCK_API_KEY:
-        LLM_PROVIDER = "bedrock"
-    elif OPENAI_API_KEY:
-        LLM_PROVIDER = "openai"
-    elif ANTHROPIC_API_KEY:
-        LLM_PROVIDER = "anthropic"
-    elif OPENROUTER_API_KEY:
-        LLM_PROVIDER = "openrouter"
-    else:
-        LLM_PROVIDER = "openai"  # fallback
+# Provider is selected per call; environment only contributes credentials.
 
-logger.info(f"[AgenticDS] LLM_PROVIDER={LLM_PROVIDER}")
+logger.info("[AgenticDS] Provider config loaded from environment variables")
 
 # Export for use in event compression
 __all__ = [
@@ -147,7 +113,6 @@ __all__ = [
     'DEFAULT_MODEL_NAME',
     'REVIEW_MODEL_NAME',
     'CODING_MODEL_NAME',
-    'LLM_PROVIDER',
     'OPENROUTER_API_KEY',
     'OPENROUTER_API_BASE',
     'AWS_BEDROCK_API_KEY',
@@ -157,58 +122,55 @@ __all__ = [
     'create_litellm_model',
     'get_default_model',
     'get_review_model',
+    'resolve_model_api_pair',
+    'resolve_provider_from_model_name',
     'resolve_provider_for_role',
     'get_generate_content_config',
     'exit_loop_simple',
     'is_network_disabled',
 ]
 
-# Set up LiteLLM environment based on provider
-if LLM_PROVIDER == "bedrock":
-    if AWS_BEDROCK_API_KEY:
-        os.environ["AWS_BEARER_TOKEN_BEDROCK"] = AWS_BEDROCK_API_KEY
+if AWS_BEDROCK_API_KEY:
+    os.environ["AWS_BEARER_TOKEN_BEDROCK"] = AWS_BEDROCK_API_KEY
     os.environ["AWS_REGION_NAME"] = AWS_REGION_NAME
-    logger.info(f"[AgenticDS] AWS Bedrock configured (region={AWS_REGION_NAME})")
-elif LLM_PROVIDER == "openrouter":
-    if OPENROUTER_API_KEY:
-        os.environ["OPENROUTER_API_KEY"] = OPENROUTER_API_KEY
-        logger.info("[AgenticDS] OpenRouter API key configured")
-    else:
-        logger.warning("[AgenticDS] OPENROUTER_API_KEY not set - using default credentials")
-elif LLM_PROVIDER == "openai":
-    if OPENAI_API_KEY:
-        os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
-    if OPENAI_API_BASE:
-        os.environ["OPENAI_API_BASE"] = OPENAI_API_BASE
-    logger.info("[AgenticDS] OpenAI provider configured")
-elif LLM_PROVIDER == "anthropic":
-    if ANTHROPIC_API_KEY:
-        os.environ["ANTHROPIC_API_KEY"] = ANTHROPIC_API_KEY
-    if ANTHROPIC_API_BASE:
-        os.environ["ANTHROPIC_API_BASE"] = ANTHROPIC_API_BASE
-    logger.info("[AgenticDS] Anthropic provider configured")
-else:
-    logger.warning(f"[AgenticDS] Unknown LLM_PROVIDER '{LLM_PROVIDER}' - no provider-specific setup")
+if OPENROUTER_API_KEY:
+    os.environ["OPENROUTER_API_KEY"] = OPENROUTER_API_KEY
+if OPENAI_API_KEY:
+    os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
+if OPENAI_API_BASE:
+    os.environ["OPENAI_API_BASE"] = OPENAI_API_BASE
+if ANTHROPIC_API_KEY:
+    os.environ["ANTHROPIC_API_KEY"] = ANTHROPIC_API_KEY
+if ANTHROPIC_API_BASE:
+    os.environ["ANTHROPIC_API_BASE"] = ANTHROPIC_API_BASE
 
 _maybe_enable_litellm_debug()
+
 
 def _normalize_model_name(provider: str, model_name: str) -> str:
     """Normalize model names for provider-specific LiteLLM routing."""
     if not model_name:
         return model_name
 
-    if provider == "openai" and "/" not in model_name:
-        return f"openai/{model_name}"
-        # return model_name
-    if provider == "anthropic" and "/" not in model_name:
-        return f"anthropic/{model_name}"
+    model_name = str(model_name).strip()
+
+    if provider == "openai" and model_name.startswith("openai/"):
+        return model_name[len("openai/"):]
+    if provider == "anthropic":
+        if model_name.startswith("anthropic/"):
+            model_name = model_name[len("anthropic/"):]
+
+        # Anthropic accepts hyphenated major/minor aliases (e.g., 4-5), not dot form (4.5).
+        model_name = re.sub(
+            r"^(claude-(?:sonnet|opus|haiku)-)(\d+)\.(\d+)(.*)$",
+            r"\1\2-\3\4",
+            model_name,
+        )
+        return model_name
     if provider == "openrouter" and model_name.startswith("openrouter/"):
         return model_name[len("openrouter/"):]
-    # if provider == "local" and model_name.startswith(("local/", "ollama/", "huggingface/")):
-    if provider == "local" and "/" not in model_name:
-        # return f"local/{model_name}"
-        # model_name = model_name.split("/", 1)[-1]  # Remove any provider prefix for local models
-        return model_name
+    if provider == "local" and model_name.startswith("local/"):
+        return model_name[len("local/"):]
     return model_name
 
 
@@ -224,64 +186,58 @@ def _infer_provider_from_model_name(model_name: str) -> Optional[str]:
     return None
 
 
-def _resolve_api_base_for_provider(model_config: dict, provider: str, role: str) -> Optional[str]:
-    """Resolve API base URL from per-provider settings with backward-compatible fallbacks."""
-    provider = (provider or "").lower()
-    role = (role or "").lower()
-
-    source_key = {
-        "planning": "planning_api_base_source",
-        "review": "review_api_base_source",
-        "coding": "coding_api_base_source",
-    }.get(role)
-    selected_source = (model_config.get(source_key, "") if source_key else "").strip().lower()
-    if selected_source == "openai":
-        return model_config.get("openai_api_base")
-    if selected_source == "anthropic":
-        return model_config.get("anthropic_api_base")
-    if selected_source == "local":
-        return model_config.get("local_api_base") or "http://localhost:11434"
-
-    if provider == "openai":
-        return model_config.get("openai_api_base")
-    if provider == "anthropic":
-        return model_config.get("anthropic_api_base")
-    if provider == "local":
-        return model_config.get("local_api_base") or "http://localhost:11434"
-
-    return model_config.get("litellm_api_base")
+def resolve_provider_from_model_name(model_name: str, fallback: Optional[str] = None) -> str:
+    """Resolve provider strictly from model name prefix, with optional fallback."""
+    inferred = _infer_provider_from_model_name(model_name or "")
+    if inferred:
+        return inferred
+    return (fallback or "openai").lower()
 
 
-def resolve_provider_for_role(model_config: Optional[dict], role: str = "planning") -> str:
-    """Resolve effective provider for a role, allowing review model to use a different provider."""
+def resolve_model_api_pair(model_config: Optional[dict], role: str = "planning") -> tuple[str, Optional[str]]:
+    """Resolve a role into its effective model name and API base URL."""
+    role = (role or "planning").lower()
+
+    if role == "coding":
+        default_name = CODING_MODEL_NAME
+        role_model_key = "coding_model"
+    elif role == "review":
+        default_name = REVIEW_MODEL_NAME
+        role_model_key = "review_model"
+    else:
+        default_name = DEFAULT_MODEL_NAME
+        role_model_key = "planning_model"
+
     if not model_config:
-        return LLM_PROVIDER
+        provider = resolve_provider_from_model_name(default_name, fallback="openai")
+        model_name = _normalize_model_name(provider, default_name)
+        default_api_base, _ = _resolve_provider_defaults(provider)
+        return model_name, default_api_base
 
-    role_key = {
-        "planning": "planning_provider",
-        "review": "review_provider",
-        "coding": "coding_provider",
-    }.get((role or "").lower())
-    configured_provider = (model_config.get(role_key) or model_config.get("provider") or LLM_PROVIDER).lower()
+    raw_model_name = str(model_config.get(role_model_key, "") or "").strip()
+    if not raw_model_name:
+        raw_model_name = default_name
 
-    model_name = resolve_model_name(model_config, role=role)
-    inferred_provider = _infer_provider_from_model_name(model_name)
-    if inferred_provider and inferred_provider != configured_provider:
-        logger.info(
-            "[AgenticDS] provider override by model role=%s configured_provider=%s inferred_provider=%s model=%s",
-            role,
-            configured_provider,
-            inferred_provider,
-            model_name,
-        )
-        return inferred_provider
-
-    return configured_provider
+    provider = resolve_provider_from_model_name(
+        raw_model_name,
+        fallback=(model_config.get(f"{role}_provider") or "openai"),
+    )
+    model_name = _normalize_model_name(provider, raw_model_name)
+    api_base = model_config.get(f"{role}_api_base") or None
+    return model_name, api_base
 
 
 def resolve_model_name(model_config: Optional[dict], role: str = "planning") -> str:
-    """Resolve the effective model name for a given role and provider."""
+    """Backward-compatible model resolver; now sourced from model+api_base pair logic."""
+    model_name, _ = resolve_model_api_pair(model_config, role=role)
+    return model_name
+
+
+def resolve_provider_for_role(model_config: Optional[dict], role: str = "planning") -> str:
+    """Resolve provider from the raw role config, preserving explicit role provider selection."""
     role = (role or "planning").lower()
+    role_model_key = f"{role}_model"
+    role_provider_key = f"{role}_provider"
 
     if not model_config:
         if role == "coding":
@@ -290,56 +246,13 @@ def resolve_model_name(model_config: Optional[dict], role: str = "planning") -> 
             default_name = REVIEW_MODEL_NAME
         else:
             default_name = DEFAULT_MODEL_NAME
-        return _normalize_model_name(LLM_PROVIDER, default_name)
+        return resolve_provider_from_model_name(default_name, fallback="openai")
 
-    role_key = {
-        "planning": "planning_provider",
-        "review": "review_provider",
-        "coding": "coding_provider",
-    }.get(role)
-    provider = (model_config.get(role_key) or model_config.get("provider") or LLM_PROVIDER).lower()
-
-    if role == "coding":
-        model_name = model_config.get("coding_model", "")
-    elif role == "review":
-        model_name = model_config.get("review_model", "")
-    else:
-        model_name = model_config.get("planning_model", "")
-
-    # if not model_name:
-    #     if role == "coding":
-    #         if provider == "openrouter":
-    #             model_name = "claude-sonnet-4-5"
-    #         elif provider == "anthropic":
-    #             model_name = "claude-sonnet-4-5"
-    #         elif provider == "openai":
-    #             model_name = "gpt-4.1-mini"
-    #         elif provider == "bedrock":
-    #             model_name = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-    #         elif provider == "local":
-    #             model_name = "local/qwen3:27b"
-    #         else:
-    #             model_name = CODING_MODEL_NAME
-    #     elif role == "review":
-    #         model_name = REVIEW_MODEL_NAME
-    #     elif provider == "openrouter":
-    #         model_name = "anthropic/claude-sonnet-4-5"
-    #     elif provider == "anthropic":
-    #         model_name = "anthropic/claude-sonnet-4-5"
-    #     elif provider == "openai":
-    #         model_name = "openai/gpt-4.1-mini"
-    #     else:
-    #         model_name = DEFAULT_MODEL_NAME
-
-    if not model_name:
-        if role == "coding":
-            model_name = CODING_MODEL_NAME
-        elif role == "review":
-            model_name = REVIEW_MODEL_NAME
-        else:
-            model_name = DEFAULT_MODEL_NAME
-
-    return _normalize_model_name(provider, model_name)
+    raw_model_name = str(model_config.get(role_model_key, "") or "").strip()
+    return resolve_provider_from_model_name(
+        raw_model_name,
+        fallback=(model_config.get(role_provider_key) or "openai"),
+    )
 
 
 def calculate_llm_cost(
@@ -354,21 +267,31 @@ def calculate_llm_cost(
     if not model_name:
         return 0.0
 
-    provider = (provider_override or LLM_PROVIDER).lower()
+    provider = (provider_override or resolve_provider_from_model_name(model_name, fallback="openai")).lower()
     normalized_model = _normalize_model_name(provider, model_name)
+    prompt_tokens = abs(int(prompt_tokens))
+    completion_tokens = abs(int(completion_tokens))
+    cached_tokens = abs(int(cached_tokens))
+
+    # Some Anthropic usage payloads report cache reads separately from input tokens.
+    # If cache reads exceed prompt tokens, LiteLLM's internal cache discount math can
+    # become negative unless prompt includes cached tokens too.
+    prompt_tokens_for_pricing = prompt_tokens
+    if cached_tokens > prompt_tokens:
+        prompt_tokens_for_pricing = prompt_tokens + cached_tokens
 
     try:
         import litellm
 
         prompt_cost, completion_cost = litellm.cost_per_token(
             model=normalized_model,
-            prompt_tokens=max(prompt_tokens, 0),
-            completion_tokens=max(completion_tokens, 0),
-            cache_read_input_tokens=max(cached_tokens, 0),
+            prompt_tokens=prompt_tokens_for_pricing,
+            completion_tokens=completion_tokens,
+            cache_read_input_tokens=cached_tokens,
             custom_llm_provider=provider,
             call_type=call_type,
         )
-        return float(prompt_cost + completion_cost)
+        return abs(float(prompt_cost + completion_cost))
     except Exception as e:
         logger.debug(
             "[AgenticDS] Failed to calculate LLM cost for model=%s provider=%s: %s",
@@ -462,7 +385,7 @@ def create_litellm_model(model_name: str, num_retries: int = 2, timeout: int = 3
     timeout : int
         Request timeout in seconds
     provider_override : str, optional
-        Override the global LLM_PROVIDER for this model
+        Override inferred provider for this model
     api_base_override : str, optional
         Override the API base URL (for local providers)
     api_key_override : str, optional
@@ -475,7 +398,7 @@ def create_litellm_model(model_name: str, num_retries: int = 2, timeout: int = 3
     """
     from google.adk.models.lite_llm import LiteLlm
 
-    provider = (provider_override or LLM_PROVIDER).lower()
+    provider = (provider_override or resolve_provider_from_model_name(model_name, fallback="openai")).lower()
     inferred_provider = _infer_provider_from_model_name(model_name)
     if inferred_provider and inferred_provider != provider:
         logger.info(
@@ -513,33 +436,36 @@ def create_litellm_model(model_name: str, num_retries: int = 2, timeout: int = 3
         return LiteLlm(**kwargs)
     elif provider == "bedrock":
         _log_litellm_target(provider, model_name, effective_api_base)
-        return LiteLlm(
-            model=model_name,
-            num_retries=num_retries,
-            timeout=timeout,
-        )
+        kwargs = {
+            "model": model_name,
+            "num_retries": num_retries,
+            "timeout": timeout,
+            "custom_llm_provider": "bedrock",
+        }
+        return LiteLlm(**kwargs)
     elif provider == "openrouter":
         openrouter_model = _sanitize_openrouter_model(model_name)
         if openrouter_model != model_name:
             logger.info("[LiteLLM] normalized OpenRouter model from %s to %s", model_name, openrouter_model)
         _log_litellm_target(provider, openrouter_model, effective_api_base)
-        return LiteLlm(
-            model=openrouter_model,
-            num_retries=num_retries,
-            timeout=timeout,
-            api_base=effective_api_base or OPENROUTER_API_BASE,
-            api_key=effective_api_key or OPENROUTER_API_KEY,
-        )
+        kwargs = {
+            "model": openrouter_model,
+            "num_retries": num_retries,
+            "timeout": timeout,
+            "custom_llm_provider": "openrouter",
+            "api_base": effective_api_base or OPENROUTER_API_BASE,
+            "api_key": effective_api_key or OPENROUTER_API_KEY,
+        }
+        return LiteLlm(**kwargs)
     elif provider == "openai":
         _log_litellm_target(provider, model_name, effective_api_base)
         if effective_api_base and not effective_api_base.endswith("/v1"):
             effective_api_base += "/v1"
-        if model_name.startswith("openai/"):
-            model_name = model_name[len("openai/"):]
         kwargs = {
             "model": model_name,
             "num_retries": num_retries,
             "timeout": timeout,
+            "custom_llm_provider": "openai",
         }
         if effective_api_base:
             kwargs["api_base"] = effective_api_base
@@ -553,6 +479,7 @@ def create_litellm_model(model_name: str, num_retries: int = 2, timeout: int = 3
             "model": model_name,
             "num_retries": num_retries,
             "timeout": timeout,
+            "custom_llm_provider": "anthropic",
         }
         if effective_api_base:
             kwargs["api_base"] = effective_api_base
@@ -593,34 +520,15 @@ def create_litellm_model_from_config(model_config: dict, role: str = "planning",
     if not model_config:
         return create_litellm_model(DEFAULT_MODEL_NAME, num_retries, timeout)
 
-    role_key = {
-        "planning": "planning_provider",
-        "review": "review_provider",
-        "coding": "coding_provider",
-    }.get((role or "").lower())
-    configured_provider = (model_config.get(role_key) or model_config.get("provider") or LLM_PROVIDER).lower()
+    model_name, litellm_api_base = resolve_model_api_pair(model_config, role=role)
     provider = resolve_provider_for_role(model_config, role=role)
-    litellm_api_base = _resolve_api_base_for_provider(model_config, provider, role)
-    api_key = model_config.get("api_key")
-    if provider != configured_provider:
-        if litellm_api_base:
-            logger.info(
-                "[AgenticDS] ignoring shared litellm_api_base for role=%s due to provider change %s -> %s",
-                role,
-                configured_provider,
-                provider,
-            )
-        litellm_api_base = None
-        api_key = None
-
-    model_name = resolve_model_name(model_config, role=role)
     _log_litellm_target(provider, model_name, litellm_api_base, role=role)
 
     return create_litellm_model(
         model_name, num_retries, timeout,
         provider_override=provider,
         api_base_override=litellm_api_base,
-        api_key_override=api_key,
+        api_key_override=model_config.get("api_key"),
     )
 
 
@@ -741,7 +649,7 @@ def get_generate_content_config(
             )
         ),
     }
-    provider = (provider_override or LLM_PROVIDER).lower()
+    provider = (provider_override or resolve_provider_from_model_name(DEFAULT_MODEL_NAME, fallback="openai")).lower()
 
     # Local OpenAI-compatible servers (e.g., vLLM) often reject tool_choice="auto"
     # unless started with explicit flags. Disable automatic function-calling by

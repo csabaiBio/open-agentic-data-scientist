@@ -1,6 +1,7 @@
 """FastAPI application for Agentic Data Scientist web interface."""
 
 import asyncio
+from datetime import datetime
 import importlib
 import json
 import logging
@@ -21,8 +22,19 @@ for lib_name in ["LiteLLM", "litellm", "httpx", "httpcore", "openai", "anthropic
     logging.getLogger(lib_name).setLevel(logging.WARNING)
 os.environ["LITELLM_LOG"] = "ERROR"
 
-from .models import CostLimitUpdateRequest, ModelConfig, PaperRequest, PaperResponse, ProjectCreate, ProjectMode, ProjectStatus
-from .project_manager import ProjectManager
+from .llm_model_store import LlmModelStore
+from .models import (
+    CostLimitUpdateRequest,
+    LlmModelCreate,
+
+    ModelConfig,
+    PaperRequest,
+    PaperResponse,
+    ProjectCreate,
+    ProjectMode,
+    ProjectStatus,
+)
+from .project_manager import PROJECTS_DIR, ProjectManager
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +53,46 @@ app.add_middleware(
 )
 
 manager = ProjectManager()
+llm_model_store = LlmModelStore(PROJECTS_DIR / "llm_models.sqlite3")
+
+
+def _apply_selected_llm_model(
+    selected_model,
+    role: str,
+    *,
+    planning_model: str,
+    review_model: str,
+    coding_model: str,
+    planning_provider: str,
+    review_provider: str,
+    coding_provider: str,
+    planning_api_base: str,
+    review_api_base: str,
+    coding_api_base: str,
+):
+    if not selected_model:
+        return (
+            planning_model, review_model, coding_model,
+            planning_provider, review_provider, coding_provider,
+            planning_api_base, review_api_base, coding_api_base,
+        )
+
+    model_name = selected_model.model_name.strip()
+    provider = selected_model.type.value
+    api_base = selected_model.provider_url.strip()
+
+    if role == "planning":
+        planning_model, planning_provider, planning_api_base = model_name, provider, api_base
+    elif role == "review":
+        review_model, review_provider, review_api_base = model_name, provider, api_base
+    elif role == "coding":
+        coding_model, coding_provider, coding_api_base = model_name, provider, api_base
+
+    return (
+        planning_model, review_model, coding_model,
+        planning_provider, review_provider, coding_provider,
+        planning_api_base, review_api_base, coding_api_base,
+    )
 
 
 def _warm_backend_imports() -> None:
@@ -76,19 +128,6 @@ async def _run_backend_warmup() -> None:
         app.state.backend_warmup_task = None
 
 
-def _infer_provider_from_model_name(model_name: str) -> str:
-    model = (model_name or "").strip().lower()
-    if not model:
-        return ""
-    if model.startswith("openai/"):
-        return "openai"
-    if model.startswith("anthropic/"):
-        return "anthropic"
-    if model.startswith("ollama/") or model.startswith("local/"):
-        return "local"
-    return ""
-
-
 # ── Projects CRUD ──────────────────────────────────────────────────
 
 @app.post("/api/warmup")
@@ -115,6 +154,35 @@ async def list_projects():
     return manager.list_projects()
 
 
+@app.get("/api/llm-models")
+async def list_llm_models():
+    return llm_model_store.list_models()
+
+
+@app.post("/api/llm-models")
+async def create_llm_model(req: LlmModelCreate):
+    model_name = req.model_name.strip()
+    provider_url = req.provider_url.strip()
+    if not model_name:
+        raise HTTPException(400, "model_name is required")
+    if not provider_url:
+        raise HTTPException(400, "provider_url is required")
+    try:
+        return llm_model_store.create_model(
+            LlmModelCreate(type=req.type, model_name=model_name, provider_url=provider_url),
+        )
+    except Exception as e:
+        raise HTTPException(400, f"Failed to create LLM model: {e}")
+
+
+@app.delete("/api/llm-models/{model_id}")
+async def delete_llm_model(model_id: int):
+    ok = llm_model_store.delete_model(model_id)
+    if not ok:
+        raise HTTPException(404, "LLM model not found")
+    return {"status": "deleted"}
+
+
 @app.get("/api/projects/{project_id}")
 async def get_project(project_id: str):
     project = manager.get_project(project_id)
@@ -130,16 +198,9 @@ async def create_project(
     num_papers: int = Form(10),
     days_back: int = Form(30),
     max_cost_usd: float = Form(0.0),
-    planning_model: str = Form(""),
-    review_model: str = Form(""),
-    coding_model: str = Form(""),
-    model_openai_api_base: str = Form(""),
-    model_anthropic_api_base: str = Form(""),
-    model_local_api_base: str = Form(""),
-    model_planning_api_base_source: str = Form(""),
-    model_review_api_base_source: str = Form(""),
-    model_coding_api_base_source: str = Form(""),
-    model_litellm_api_base: str = Form(""),
+    planning_llm_model_id: str = Form(""),
+    review_llm_model_id: str = Form(""),
+    coding_llm_model_id: str = Form(""),
     base_project_id: str = Form(""),
     files: list[UploadFile] = File(default=[]),
 ):
@@ -151,46 +212,50 @@ async def create_project(
     }
     project_mode = mode_map.get(mode, ProjectMode.ORCHESTRATED)
 
-    # Build model config if any model settings were specified
-    mc = None
-    has_model_overrides = any([
-        planning_model,
-        review_model,
-        coding_model,
-        model_openai_api_base,
-        model_anthropic_api_base,
-        model_local_api_base,
-        model_planning_api_base_source,
-        model_review_api_base_source,
-        model_coding_api_base_source,
-        model_litellm_api_base,
-    ])
-    if has_model_overrides:
-        inferred_provider = (
-            _infer_provider_from_model_name(planning_model)
-            or _infer_provider_from_model_name(review_model)
-            or _infer_provider_from_model_name(coding_model)
-            or "openai"
+    selected_planning_model = llm_model_store.get_model(int(planning_llm_model_id)) if planning_llm_model_id else None
+    selected_review_model = llm_model_store.get_model(int(review_llm_model_id)) if review_llm_model_id else None
+    selected_coding_model = llm_model_store.get_model(int(coding_llm_model_id)) if coding_llm_model_id else None
+
+    if planning_llm_model_id and not selected_planning_model:
+        raise HTTPException(404, "Selected planning model not found")
+    if review_llm_model_id and not selected_review_model:
+        raise HTTPException(404, "Selected review model not found")
+    if coding_llm_model_id and not selected_coding_model:
+        raise HTTPException(404, "Selected coding model not found")
+
+    planning_model = review_model = coding_model = ""
+    planning_provider = review_provider = coding_provider = ""
+    planning_api_base = review_api_base = coding_api_base = ""
+
+    for selected, role in [
+        (selected_planning_model, "planning"),
+        (selected_review_model, "review"),
+        (selected_coding_model, "coding"),
+    ]:
+        (
+            planning_model, review_model, coding_model,
+            planning_provider, review_provider, coding_provider,
+            planning_api_base, review_api_base, coding_api_base,
+        ) = _apply_selected_llm_model(
+            selected, role,
+            planning_model=planning_model, review_model=review_model, coding_model=coding_model,
+            planning_provider=planning_provider, review_provider=review_provider, coding_provider=coding_provider,
+            planning_api_base=planning_api_base, review_api_base=review_api_base, coding_api_base=coding_api_base,
         )
-        planning_provider = _infer_provider_from_model_name(planning_model) or inferred_provider
-        review_provider = _infer_provider_from_model_name(review_model) or planning_provider
-        coding_provider = _infer_provider_from_model_name(coding_model) or review_provider
-        litellm_api_base = model_litellm_api_base
+
+    # Build model config if any model was selected from the dashboard
+    mc = None
+    if any([planning_model, review_model, coding_model]):
         mc = ModelConfig(
-            provider=inferred_provider,
-            planning_provider=planning_provider,
-            review_provider=review_provider,
-            coding_provider=coding_provider,
-            planning_model=planning_model or "",
-            review_model=review_model or "",
-            coding_model=coding_model or "",
-            openai_api_base=model_openai_api_base or None,
-            anthropic_api_base=model_anthropic_api_base or None,
-            local_api_base=model_local_api_base or None,
-            planning_api_base_source=model_planning_api_base_source or None,
-            review_api_base_source=model_review_api_base_source or None,
-            coding_api_base_source=model_coding_api_base_source or None,
-            litellm_api_base=litellm_api_base or None,
+            planning_model=planning_model,
+            review_model=review_model,
+            coding_model=coding_model,
+            planning_provider=planning_provider or None,
+            review_provider=review_provider or None,
+            coding_provider=coding_provider or None,
+            planning_api_base=planning_api_base or None,
+            review_api_base=review_api_base or None,
+            coding_api_base=coding_api_base or None,
         )
     print("MODEL CONFIG FROM API:", mc)
     req = ProjectCreate(

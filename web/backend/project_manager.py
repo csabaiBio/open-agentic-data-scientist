@@ -39,6 +39,19 @@ def _now() -> str:
     return datetime.now().isoformat()
 
 
+def _sum_stage_durations(project) -> float:
+    """Sum completed stage durations to get total active processing time.
+
+    Using per-stage start/end timestamps avoids counting idle time that
+    accumulates when a project is interrupted and later resumed.
+    """
+    return sum(
+        s.duration_seconds
+        for s in (project.stages or [])
+        if s.duration_seconds is not None and s.duration_seconds >= 0
+    )
+
+
 def _classify_file(path: str) -> str:
     ext = Path(path).suffix.lower()
     if ext in (".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp", ".pdf"):
@@ -50,6 +63,33 @@ def _classify_file(path: str) -> str:
     if ext in (".py", ".r", ".sh", ".ipynb"):
         return "code"
     return "other"
+
+
+def _is_claude_code_failure(error_text: str) -> bool:
+    """Return True when the error looks like a Claude Code/Claude SDK runtime failure."""
+    text = (error_text or "").strip().lower()
+    if not text:
+        return False
+
+    claude_markers = (
+        "claude code",
+        "claude sdk",
+        "claude_agent_sdk",
+        "anthropic_base_url",
+        "anthropic_api_base",
+        "claude-haiku",
+        "claude-sonnet",
+        "claude-opus",
+        "model `claude",
+    )
+    if any(marker in text for marker in claude_markers):
+        return True
+
+    # Many local-route failures surface as NotFound for a Claude default model.
+    if "notfounderror" in text and "claude" in text:
+        return True
+
+    return False
 
 
 def _render_structured_response(payload: Any) -> Optional[str]:
@@ -297,9 +337,7 @@ class ProjectManager:
         if project and project.status == ProjectStatus.RUNNING:
             project.status = ProjectStatus.STOPPED
             project.completed_at = _now()
-            if project.started_at:
-                started = datetime.fromisoformat(project.started_at)
-                project.duration = (datetime.now() - started).total_seconds()
+            project.duration = _sum_stage_durations(project)
             self._save_project(project)
             self._emit_event(project_id, ProjectEvent(
                 type="status", content="Project stopped by user",
@@ -568,8 +606,12 @@ class ProjectManager:
                     self._stop_for_cost_limit(project_id, project)
                 return
             logger.exception(f"Project {project_id} failed")
-            project.status = ProjectStatus.FAILED
-            project.error = str(e)
+            error_text = str(e)
+            project.error = error_text
+            if _is_claude_code_failure(error_text):
+                project.status = ProjectStatus.STOPPED
+            else:
+                project.status = ProjectStatus.FAILED
             project.completed_at = _now()
             self._save_project(project)
             self._emit_event(project_id, ProjectEvent(
@@ -630,8 +672,12 @@ class ProjectManager:
             self._save_project(project)
         except Exception as e:
             logger.exception(f"Project {project_id} analysis failed")
-            project.status = ProjectStatus.FAILED
-            project.error = str(e)
+            error_text = str(e)
+            project.error = error_text
+            if _is_claude_code_failure(error_text):
+                project.status = ProjectStatus.STOPPED
+            else:
+                project.status = ProjectStatus.FAILED
             project.completed_at = _now()
             self._save_project(project)
             self._emit_event(project_id, ProjectEvent(
@@ -660,33 +706,8 @@ class ProjectManager:
         if project.llm_config:
             mc = project.llm_config.model_dump(exclude_none=True)
             # Propagate custom Claude endpoint to both supported env var names.
-            coding_model = (project.llm_config.coding_model or "").strip().lower()
-            coding_provider = (project.llm_config.coding_provider or "").strip().lower()
-            if not coding_provider:
-                if coding_model.startswith("openai/"):
-                    coding_provider = "openai"
-                elif coding_model.startswith("anthropic/"):
-                    coding_provider = "anthropic"
-                elif coding_model.startswith("ollama/") or coding_model.startswith("local/"):
-                    coding_provider = "local"
-                else:
-                    coding_provider = (project.llm_config.provider or "openai").lower()
-
-            selected_coding_base_source = (project.llm_config.coding_api_base_source or "").strip().lower()
-            if selected_coding_base_source == "openai":
-                coding_api_base = project.llm_config.openai_api_base
-            elif selected_coding_base_source == "anthropic":
-                coding_api_base = project.llm_config.anthropic_api_base
-            elif selected_coding_base_source == "local":
-                coding_api_base = project.llm_config.local_api_base
-            elif coding_provider == "openai":
-                coding_api_base = project.llm_config.openai_api_base
-            elif coding_provider == "anthropic":
-                coding_api_base = project.llm_config.anthropic_api_base
-            elif coding_provider == "local":
-                coding_api_base = project.llm_config.local_api_base
-            else:
-                coding_api_base = None
+            coding_provider = (project.llm_config.coding_provider or "openai").strip().lower()
+            coding_api_base = (project.llm_config.coding_api_base or "").strip() or None
             if coding_api_base:
                 os.environ["ANTHROPIC_BASE_URL"] = coding_api_base
                 os.environ["ANTHROPIC_API_BASE"] = coding_api_base
@@ -694,15 +715,20 @@ class ProjectManager:
                 # Local Anthropic-compatible servers (e.g., Ollama) need this token.
                 if coding_provider == "local":
                     os.environ["ANTHROPIC_AUTH_TOKEN"] = "ollama"
-        print("PROJECT  ", coding_provider, coding_api_base, selected_coding_base_source, project.llm_config.local_api_base  )
-        from agentic_data_scientist import DataScientist
 
+        import time as _time
+        _t0 = _time.perf_counter()
+        from agentic_data_scientist import DataScientist
+        logger.info("[TIMING] DataScientist import: %.3fs", _time.perf_counter() - _t0)
+
+        _t1 = _time.perf_counter()
         core = DataScientist(
             agent_type=agent_type,
             working_dir=str(working_dir),
             auto_cleanup=False,
             model_config=mc,
         )
+        logger.info("[TIMING] DataScientist() constructor: %.3fs", _time.perf_counter() - _t1)
 
         self._emit_event(project_id, ProjectEvent(
             type="status", content="Agent ready. Starting analysis...",
@@ -777,7 +803,7 @@ class ProjectManager:
                 ))
 
             elif event_type == "completed":
-                project.duration = event_dict.get("duration", 0)
+                project.duration = _sum_stage_durations(project)
 
             elif event_type == "usage":
                 usage = event_dict.get("usage", {}) or {}
@@ -807,6 +833,10 @@ class ProjectManager:
             elif event_type == "error":
                 project.error = event_dict.get("content", "Unknown error")
                 error_text = (project.error or "").lower()
+                if _is_claude_code_failure(project.error or ""):
+                    project.status = ProjectStatus.STOPPED
+                    self._save_project(project)
+                    break
                 # Treat LiteLLM routing/not-found failures as terminal errors.
                 if (
                     "litellm.notfounderror" in error_text
@@ -844,9 +874,7 @@ class ProjectManager:
             else:
                 project.status = ProjectStatus.COMPLETED
             project.completed_at = _now()
-            if project.started_at:
-                started = datetime.fromisoformat(project.started_at)
-                project.duration = (datetime.now() - started).total_seconds()
+            project.duration = _sum_stage_durations(project)
 
         self._scan_files(project)
         self._save_project(project)
@@ -1164,7 +1192,7 @@ class ProjectManager:
             model_config = project.llm_config.model_dump(exclude_none=True)
             llm = create_litellm_model_from_config(model_config, role="planning", num_retries=3, timeout=120)
             llm_model_name = model_config.get("planning_model") or DEFAULT_MODEL_NAME
-            provider_for_config = model_config.get("provider")
+            provider_for_config = model_config.get("planning_provider")
         else:
             llm = create_litellm_model(DEFAULT_MODEL_NAME, num_retries=3, timeout=120)
             llm_model_name = DEFAULT_MODEL_NAME
@@ -1420,7 +1448,7 @@ For each: **What** (1 line), **Why** (reference a specific result from the paper
             model_config = project.llm_config.model_dump(exclude_none=True)
             llm = create_litellm_model_from_config(model_config, role="planning", num_retries=3, timeout=120)
             llm_model_name = model_config.get("planning_model") or DEFAULT_MODEL_NAME
-            provider_for_config = model_config.get("provider")
+            provider_for_config = model_config.get("planning_provider")
         else:
             llm = create_litellm_model(DEFAULT_MODEL_NAME, num_retries=3, timeout=120)
             llm_model_name = DEFAULT_MODEL_NAME

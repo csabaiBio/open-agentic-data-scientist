@@ -70,20 +70,15 @@ class DiscoveryResult(BaseModel):
 
 class ModelConfig(BaseModel):
     """Model configuration for a project run."""
-    provider: str = "openai"  # bedrock, openrouter, openai, anthropic, local
-    planning_provider: Optional[str] = None  # explicit provider for planning_model
-    review_provider: Optional[str] = None  # explicit provider for review_model
-    coding_provider: Optional[str] = None  # explicit provider for coding_model
     planning_model: str = ""  # model ID for planning/summary agents (LiteLLM)
     review_model: str = ""  # model ID for review/critique agents (LiteLLM)
     coding_model: str = ""  # model ID for coding agent (Claude Code SDK)
-    openai_api_base: Optional[str] = None  # base URL for OpenAI models
-    anthropic_api_base: Optional[str] = None  # base URL for Anthropic models
-    local_api_base: Optional[str] = None  # base URL for local/ollama models
-    planning_api_base_source: Optional[str] = None  # openai | anthropic | local
-    review_api_base_source: Optional[str] = None  # openai | anthropic | local
-    coding_api_base_source: Optional[str] = None  #  anthropic | local
-    litellm_api_base: Optional[str] = None  # base URL for LiteLLM calls (planning/review/default)
+    planning_provider: Optional[str] = None  # openai | anthropic | local | bedrock | openrouter
+    review_provider: Optional[str] = None
+    coding_provider: Optional[str] = None
+    planning_api_base: Optional[str] = None  # API base URL for planning model
+    review_api_base: Optional[str] = None    # API base URL for review model
+    coding_api_base: Optional[str] = None    # API base URL for coding model
 
 
 class ProjectCreate(BaseModel):
@@ -168,3 +163,23 @@ class PaperResponse(BaseModel):
 
 class CostLimitUpdateRequest(BaseModel):
     max_cost_usd: Optional[float] = None
+
+
+class LlmModelType(str, Enum):
+    OPENAI = "openai"
+    ANTHROPIC = "anthropic"
+    LOCAL = "local"
+
+
+class LlmModelCreate(BaseModel):
+    type: LlmModelType
+    model_name: str
+    provider_url: str
+
+
+class LlmModel(BaseModel):
+    id: int
+    type: LlmModelType
+    model_name: str
+    provider_url: str
+    created_at: str

@@ -62,12 +62,9 @@ export interface ModelConfig {
   planning_model: string
   review_model: string
   coding_model: string
-  openai_api_base: string | null
-  anthropic_api_base: string | null
-  local_api_base: string | null
-  planning_api_base_source: string | null
-  review_api_base_source: string | null
-  coding_api_base_source: string | null
+  planning_api_base: string | null
+  review_api_base: string | null
+  coding_api_base: string | null
 }
 
 export interface Project {
@@ -122,4 +119,14 @@ export interface ProjectSummary {
   max_cost_usd: number | null
   llm_calls: number
   llm_config: ModelConfig | null
+}
+
+export type LlmModelType = 'openai' | 'anthropic' | 'local'
+
+export interface LlmModel {
+  id: number
+  type: LlmModelType
+  model_name: string
+  provider_url: string
+  created_at: string
 }
