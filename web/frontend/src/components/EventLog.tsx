@@ -174,7 +174,31 @@ function LiveDuration({ startedAt }: { startedAt: string }) {
 
 function toTimestampMs(value: string | null | undefined): number | null {
   if (!value) return null
-  const time = new Date(value).getTime()
+
+  const trimmed = value.trim()
+  if (!trimmed) return null
+
+  // Supports event timestamps emitted as HH:MM:SS(.mmm)
+  const timeOnlyMatch = trimmed.match(/^(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?$/)
+  if (timeOnlyMatch) {
+    const hour = Number(timeOnlyMatch[1])
+    const minute = Number(timeOnlyMatch[2])
+    const second = Number(timeOnlyMatch[3])
+    const millisRaw = timeOnlyMatch[4] ?? '0'
+    const millis = Number(millisRaw.padEnd(3, '0'))
+
+    if (
+      Number.isFinite(hour) && Number.isFinite(minute) && Number.isFinite(second) && Number.isFinite(millis)
+      && hour >= 0 && hour <= 23
+      && minute >= 0 && minute <= 59
+      && second >= 0 && second <= 59
+      && millis >= 0 && millis <= 999
+    ) {
+      return ((hour * 60 + minute) * 60 + second) * 1000 + millis
+    }
+  }
+
+  const time = new Date(trimmed).getTime()
   return Number.isFinite(time) ? time : null
 }
 
@@ -414,13 +438,30 @@ function MarkdownContent({ content, className = '' }: { content: string; classNa
   )
 }
 
+function PreviousStepDelta({ previousTimestamp, currentTimestamp }: { previousTimestamp?: string; currentTimestamp: string }) {
+  const currentMs = toTimestampMs(currentTimestamp)
+  const previousMs = toTimestampMs(previousTimestamp)
+
+  if (currentMs === null || previousMs === null) return null
+
+  const elapsedSeconds = Math.max(0, (currentMs - previousMs) / 1000)
+
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500">
+      <Clock className="h-3 w-3" />
+      +{formatDuration(elapsedSeconds)}
+    </span>
+  )
+}
+
 /* ── Single event card ────────────────────────────────────────── */
 
-function EventCard({ event, stages, previousUsageTimestamp }: { event: ProjectEvent; stages?: Stage[]; previousUsageTimestamp?: string }) {
+function EventCard({ event, stages, previousUsageTimestamp, previousEventTimestamp }: { event: ProjectEvent; stages?: Stage[]; previousUsageTimestamp?: string; previousEventTimestamp?: string }) {
   const [expanded, setExpanded] = useState(true)
   const isLong = event.content.length > 200
   const agentStyle = getAgentStyle(event.author || '')
   const AgentIcon = agentStyle.icon
+  const previousStepDelta = <PreviousStepDelta previousTimestamp={previousEventTimestamp} currentTimestamp={event.timestamp} />
 
   // Tool calls — compact
   if (event.type === 'tool_call') {
@@ -429,7 +470,10 @@ function EventCard({ event, stages, previousUsageTimestamp }: { event: ProjectEv
       <div className="flex items-start gap-2 px-3 py-1.5 rounded-lg bg-gray-50/60 text-xs text-gray-500 font-mono animate-fade-in">
         <Terminal className="w-3 h-3 text-cyan-400 flex-shrink-0 mt-0.5" />
         <div className="min-w-0">
-          <span className="text-cyan-700 font-medium">{prettyToolName(event.content)}</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-cyan-700 font-medium">{prettyToolName(event.content)}</span>
+            {previousStepDelta}
+          </div>
           {detail && (
             <div className="text-gray-500 mt-0.5 break-all whitespace-pre-wrap">
               {detail}
@@ -446,7 +490,10 @@ function EventCard({ event, stages, previousUsageTimestamp }: { event: ProjectEv
       <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-red-50 border border-red-100 animate-fade-in">
         <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
-          <span className="text-xs font-semibold text-red-600 uppercase tracking-wide">Error</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-semibold text-red-600 uppercase tracking-wide">Error</span>
+            {previousStepDelta}
+          </div>
           <p className="text-sm text-red-700 mt-0.5 break-words">{event.content}</p>
         </div>
       </div>
@@ -472,6 +519,7 @@ function EventCard({ event, stages, previousUsageTimestamp }: { event: ProjectEv
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs font-semibold text-emerald-700 uppercase tracking-wide">LLM Cost</span>
+            {previousStepDelta}
             {llmCallIndex !== null && (
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
                 Call {llmCallIndex}
@@ -508,7 +556,8 @@ function EventCard({ event, stages, previousUsageTimestamp }: { event: ProjectEv
     return (
       <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50/60 animate-fade-in">
         <Info className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
-        <span className="text-sm font-medium text-blue-700">{event.content}</span>
+        <span className="text-sm font-medium text-blue-700 flex-1">{event.content}</span>
+        {previousStepDelta}
       </div>
     )
   }
@@ -519,6 +568,9 @@ function EventCard({ event, stages, previousUsageTimestamp }: { event: ProjectEv
       <div className={`flex items-start gap-2.5 px-4 py-3 rounded-xl ${agentStyle.bg} border ${agentStyle.border} animate-fade-in`}>
         <Compass className={`w-4 h-4 ${agentStyle.color} flex-shrink-0 mt-0.5`} />
         <div className="flex-1 min-w-0">
+          <div className="mb-2 flex items-center gap-2 flex-wrap">
+            {previousStepDelta}
+          </div>
           <MarkdownContent content={event.content} className="text-sm" />
         </div>
       </div>
@@ -535,6 +587,7 @@ function EventCard({ event, stages, previousUsageTimestamp }: { event: ProjectEv
         >
           <Brain className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
           <span className="text-xs text-purple-400 italic flex-1 truncate">{event.content.slice(0, 80)}...</span>
+          {previousStepDelta}
           {expanded ? <ChevronDown className="w-3 h-3 text-purple-300" /> : <ChevronRight className="w-3 h-3 text-purple-300" />}
         </button>
         {expanded && (
@@ -560,6 +613,7 @@ function EventCard({ event, stages, previousUsageTimestamp }: { event: ProjectEv
         <span className={`text-xs font-bold ${agentStyle.color} uppercase tracking-wider flex-1 text-left`}>
           {prettyAgentName(event.author || 'System')}
         </span>
+        {previousStepDelta}
         {isLong && (
           expanded
             ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
@@ -589,9 +643,16 @@ export default function EventLog({ events, stages = [] }: { events: ProjectEvent
   // Filter tool_results (they are verbose and not useful to the user)
   const filtered = events.filter(e => e.type !== 'tool_result')
   const previousUsageTimestampById = new Map<number, string>()
+  const previousEventTimestampById = new Map<number, string>()
   let lastUsageTimestamp: string | null = null
+  let lastEventTimestamp: string | null = null
 
   for (const event of filtered) {
+    if (lastEventTimestamp) {
+      previousEventTimestampById.set(event.id, lastEventTimestamp)
+    }
+    lastEventTimestamp = event.timestamp
+
     if (event.type !== 'usage') continue
     if (lastUsageTimestamp) {
       previousUsageTimestampById.set(event.id, lastUsageTimestamp)
@@ -616,6 +677,7 @@ export default function EventLog({ events, stages = [] }: { events: ProjectEvent
           event={event}
           stages={stages}
           previousUsageTimestamp={previousUsageTimestampById.get(event.id)}
+          previousEventTimestamp={previousEventTimestampById.get(event.id)}
         />
       ))}
       <div ref={bottomRef} />

@@ -865,7 +865,7 @@ export default function Dashboard() {
                       {p.mode}
                     </span>
                   </div>
-                  <h3 className="text-sm font-medium text-gray-900 truncate">{p.query}</h3>
+                  <h3 className="text-sm font-medium text-gray-900 whitespace-normal break-words leading-5">{p.query}</h3>
                   {p.llm_config && (
                     <>
                       <div className="flex items-center gap-2 mt-1.5 flex-wrap">
