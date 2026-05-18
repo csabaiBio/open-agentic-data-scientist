@@ -65,6 +65,9 @@ export interface ModelConfig {
   planning_api_base: string | null
   review_api_base: string | null
   coding_api_base: string | null
+  planning_api_key?: string | null
+  review_api_key?: string | null
+  coding_api_key?: string | null
 }
 
 export interface Project {
@@ -128,5 +131,7 @@ export interface LlmModel {
   type: LlmModelType
   model_name: string
   provider_url: string
+  has_api_key: boolean
+  api_key_preview?: string | null
   created_at: string
 }

@@ -528,7 +528,7 @@ def create_litellm_model_from_config(model_config: dict, role: str = "planning",
         model_name, num_retries, timeout,
         provider_override=provider,
         api_base_override=litellm_api_base,
-        api_key_override=model_config.get("api_key"),
+        api_key_override=model_config.get(f"{role}_api_key") or model_config.get("api_key"),
     )
 
 

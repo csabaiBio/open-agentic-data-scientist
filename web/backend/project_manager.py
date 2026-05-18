@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
+from .llm_model_store import LlmModelStore
 from .models import (
     DiscoveryResult,
     GeneratedFile,
@@ -169,10 +170,28 @@ class ProjectManager:
     def __init__(self, projects_dir: Optional[Path] = None):
         self.projects_dir = projects_dir or PROJECTS_DIR
         self.projects_dir.mkdir(parents=True, exist_ok=True)
+        self._llm_model_store = LlmModelStore(PROJECTS_DIR / "llm_models.sqlite3")
         self._projects: Dict[str, Project] = {}
         self._running_tasks: Dict[str, asyncio.Task] = {}
         self._event_queues: Dict[str, List[asyncio.Queue]] = {}
         self._load_existing_projects()
+
+    def _build_runtime_model_config(self, project: Project) -> Optional[Dict[str, Any]]:
+        if not project.llm_config:
+            return None
+
+        runtime_config = project.llm_config.model_dump(exclude_none=True)
+        for role, model_id in (
+            ("planning", project.planning_llm_model_id),
+            ("review", project.review_llm_model_id),
+            ("coding", project.coding_llm_model_id),
+        ):
+            if not model_id:
+                continue
+            stored_model = self._llm_model_store.get_stored_model(model_id)
+            if stored_model and stored_model.api_key:
+                runtime_config[f"{role}_api_key"] = stored_model.api_key
+        return runtime_config
 
     def _load_existing_projects(self):
         """Load project metadata from disk on startup."""
@@ -300,6 +319,9 @@ class ProjectManager:
             num_papers=req.num_papers,
             days_back=req.days_back,
             max_cost_usd=req.max_cost_usd,
+            planning_llm_model_id=req.planning_llm_model_id,
+            review_llm_model_id=req.review_llm_model_id,
+            coding_llm_model_id=req.coding_llm_model_id,
             llm_config=req.llm_config,
             base_project_id=req.base_project_id,
         )
@@ -704,10 +726,11 @@ class ProjectManager:
         # Build model_config dict from project settings
         mc = None
         if project.llm_config:
-            mc = project.llm_config.model_dump(exclude_none=True)
+            mc = self._build_runtime_model_config(project)
             # Propagate custom Claude endpoint to both supported env var names.
             coding_provider = (project.llm_config.coding_provider or "openai").strip().lower()
             coding_api_base = (project.llm_config.coding_api_base or "").strip() or None
+            coding_api_key = str((mc or {}).get("coding_api_key") or "").strip() or None
             if coding_api_base:
                 os.environ["ANTHROPIC_BASE_URL"] = coding_api_base
                 os.environ["ANTHROPIC_API_BASE"] = coding_api_base
@@ -715,6 +738,15 @@ class ProjectManager:
                 # Local Anthropic-compatible servers (e.g., Ollama) need this token.
                 if coding_provider == "local":
                     os.environ["ANTHROPIC_AUTH_TOKEN"] = "ollama"
+            if coding_api_key:
+                if coding_provider == "anthropic":
+                    os.environ["ANTHROPIC_API_KEY"] = coding_api_key
+                    os.environ["ANTHROPIC_AUTH_TOKEN"] = coding_api_key
+                elif coding_provider == "openai":
+                    os.environ["OPENAI_API_KEY"] = coding_api_key
+                elif coding_provider == "bedrock":
+                    os.environ["AWS_BEDROCK_API_KEY"] = coding_api_key
+                    os.environ["AWS_BEARER_TOKEN_BEDROCK"] = coding_api_key
 
         import time as _time
         _t0 = _time.perf_counter()
@@ -1189,7 +1221,7 @@ class ProjectManager:
         )
 
         if project.llm_config:
-            model_config = project.llm_config.model_dump(exclude_none=True)
+            model_config = self._build_runtime_model_config(project)
             llm = create_litellm_model_from_config(model_config, role="planning", num_retries=3, timeout=120)
             llm_model_name = model_config.get("planning_model") or DEFAULT_MODEL_NAME
             provider_for_config = model_config.get("planning_provider")
@@ -1445,7 +1477,7 @@ For each: **What** (1 line), **Why** (reference a specific result from the paper
             create_litellm_model_from_config,
         )
         if project.llm_config:
-            model_config = project.llm_config.model_dump(exclude_none=True)
+            model_config = self._build_runtime_model_config(project)
             llm = create_litellm_model_from_config(model_config, role="planning", num_retries=3, timeout=120)
             llm_model_name = model_config.get("planning_model") or DEFAULT_MODEL_NAME
             provider_for_config = model_config.get("planning_provider")

@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from .models import LlmModel, LlmModelCreate, LlmModelType
+from .models import LlmModel, LlmModelCreate, LlmModelType, StoredLlmModel
 
 
 class LlmModelStore:
@@ -32,41 +32,76 @@ class LlmModelStore:
                     type TEXT NOT NULL,
                     model_name TEXT NOT NULL UNIQUE,
                     provider_url TEXT NOT NULL,
+                    api_key TEXT,
                     created_at TEXT NOT NULL
                 )
                 """
             )
+            columns = {
+                str(row[1])
+                for row in conn.execute("PRAGMA table_info(llm_models)").fetchall()
+            }
+            if "api_key" not in columns:
+                conn.execute("ALTER TABLE llm_models ADD COLUMN api_key TEXT")
             conn.commit()
+
+    @staticmethod
+    def _preview_api_key(api_key: Optional[str]) -> Optional[str]:
+        if not api_key:
+            return None
+        key = api_key.strip()
+        if len(key) <= 8:
+            return "*" * len(key)
+        return f"{key[:4]}...{key[-4:]}"
+
+    def _public_model_from_row(self, row: sqlite3.Row) -> LlmModel:
+        api_key = str(row["api_key"]).strip() if row["api_key"] else None
+        return LlmModel(
+            id=int(row["id"]),
+            type=LlmModelType(str(row["type"]).lower()),
+            model_name=str(row["model_name"]),
+            provider_url=str(row["provider_url"]),
+            has_api_key=bool(api_key),
+            api_key_preview=self._preview_api_key(api_key),
+            created_at=str(row["created_at"]),
+        )
+
+    def _stored_model_from_row(self, row: sqlite3.Row) -> StoredLlmModel:
+        return StoredLlmModel(
+            id=int(row["id"]),
+            type=LlmModelType(str(row["type"]).lower()),
+            model_name=str(row["model_name"]),
+            provider_url=str(row["provider_url"]),
+            api_key=str(row["api_key"]).strip() if row["api_key"] else None,
+            created_at=str(row["created_at"]),
+        )
 
     def list_models(self) -> List[LlmModel]:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, type, model_name, provider_url, created_at
+                SELECT id, type, model_name, provider_url, api_key, created_at
                 FROM llm_models
                 ORDER BY lower(type), lower(model_name)
                 """
             ).fetchall()
-        return [
-            LlmModel(
-                id=int(row["id"]),
-                type=LlmModelType(str(row["type"]).lower()),
-                model_name=str(row["model_name"]),
-                provider_url=str(row["provider_url"]),
-                created_at=str(row["created_at"]),
-            )
-            for row in rows
-        ]
+        return [self._public_model_from_row(row) for row in rows]
 
     def create_model(self, payload: LlmModelCreate) -> LlmModel:
         created_at = datetime.now().isoformat()
         with self._connect() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO llm_models (type, model_name, provider_url, created_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO llm_models (type, model_name, provider_url, api_key, created_at)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (payload.type.value, payload.model_name.strip(), payload.provider_url.strip(), created_at),
+                (
+                    payload.type.value,
+                    payload.model_name.strip(),
+                    payload.provider_url.strip(),
+                    payload.api_key.strip() if payload.api_key else None,
+                    created_at,
+                ),
             )
             conn.commit()
             lastrowid = cursor.lastrowid
@@ -81,10 +116,24 @@ class LlmModelStore:
         return model
 
     def get_model(self, model_id: int) -> Optional[LlmModel]:
+        stored = self.get_stored_model(model_id)
+        if not stored:
+            return None
+        return LlmModel(
+            id=stored.id,
+            type=stored.type,
+            model_name=stored.model_name,
+            provider_url=stored.provider_url,
+            has_api_key=bool(stored.api_key),
+            api_key_preview=self._preview_api_key(stored.api_key),
+            created_at=stored.created_at,
+        )
+
+    def get_stored_model(self, model_id: int) -> Optional[StoredLlmModel]:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT id, type, model_name, provider_url, created_at
+                SELECT id, type, model_name, provider_url, api_key, created_at
                 FROM llm_models
                 WHERE id = ?
                 """,
@@ -93,14 +142,7 @@ class LlmModelStore:
 
         if not row:
             return None
-
-        return LlmModel(
-            id=int(row["id"]),
-            type=LlmModelType(str(row["type"]).lower()),
-            model_name=str(row["model_name"]),
-            provider_url=str(row["provider_url"]),
-            created_at=str(row["created_at"]),
-        )
+        return self._stored_model_from_row(row)
 
     def delete_model(self, model_id: int) -> bool:
         with self._connect() as conn:

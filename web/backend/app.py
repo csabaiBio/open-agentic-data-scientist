@@ -54,6 +54,8 @@ app.add_middleware(
 
 manager = ProjectManager()
 llm_model_store = LlmModelStore(PROJECTS_DIR / "llm_models.sqlite3")
+DEFAULT_FALLBACK_CODING_MODEL = "claude-sonnet-4-5"
+DEFAULT_FALLBACK_CODING_PROVIDER = "anthropic"
 
 
 def _apply_selected_llm_model(
@@ -163,13 +165,14 @@ async def list_llm_models():
 async def create_llm_model(req: LlmModelCreate):
     model_name = req.model_name.strip()
     provider_url = req.provider_url.strip()
+    api_key = req.api_key.strip() if req.api_key else None
     if not model_name:
         raise HTTPException(400, "model_name is required")
     if not provider_url:
         raise HTTPException(400, "provider_url is required")
     try:
         return llm_model_store.create_model(
-            LlmModelCreate(type=req.type, model_name=model_name, provider_url=provider_url),
+            LlmModelCreate(type=req.type, model_name=model_name, provider_url=provider_url, api_key=api_key),
         )
     except Exception as e:
         raise HTTPException(400, f"Failed to create LLM model: {e}")
@@ -212,9 +215,9 @@ async def create_project(
     }
     project_mode = mode_map.get(mode, ProjectMode.ORCHESTRATED)
 
-    selected_planning_model = llm_model_store.get_model(int(planning_llm_model_id)) if planning_llm_model_id else None
-    selected_review_model = llm_model_store.get_model(int(review_llm_model_id)) if review_llm_model_id else None
-    selected_coding_model = llm_model_store.get_model(int(coding_llm_model_id)) if coding_llm_model_id else None
+    selected_planning_model = llm_model_store.get_stored_model(int(planning_llm_model_id)) if planning_llm_model_id else None
+    selected_review_model = llm_model_store.get_stored_model(int(review_llm_model_id)) if review_llm_model_id else None
+    selected_coding_model = llm_model_store.get_stored_model(int(coding_llm_model_id)) if coding_llm_model_id else None
 
     if planning_llm_model_id and not selected_planning_model:
         raise HTTPException(404, "Selected planning model not found")
@@ -243,6 +246,11 @@ async def create_project(
             planning_api_base=planning_api_base, review_api_base=review_api_base, coding_api_base=coding_api_base,
         )
 
+    # If no coding model is selected/saved, use a safe default coding model.
+    if not coding_model:
+        coding_model = DEFAULT_FALLBACK_CODING_MODEL
+        coding_provider = DEFAULT_FALLBACK_CODING_PROVIDER
+
     # Build model config if any model was selected from the dashboard
     mc = None
     if any([planning_model, review_model, coding_model]):
@@ -257,7 +265,6 @@ async def create_project(
             review_api_base=review_api_base or None,
             coding_api_base=coding_api_base or None,
         )
-    print("MODEL CONFIG FROM API:", mc)
     req = ProjectCreate(
         query=query, mode=project_mode,
         num_papers=max(1, min(20, num_papers)),
@@ -265,6 +272,9 @@ async def create_project(
         max_cost_usd=max_cost_usd if max_cost_usd > 0 else None,
         llm_config=mc,
         base_project_id=base_project_id or None,
+        planning_llm_model_id=int(planning_llm_model_id) if planning_llm_model_id else None,
+        review_llm_model_id=int(review_llm_model_id) if review_llm_model_id else None,
+        coding_llm_model_id=int(coding_llm_model_id) if coding_llm_model_id else None,
     )
     project = manager.create_project(req)
 

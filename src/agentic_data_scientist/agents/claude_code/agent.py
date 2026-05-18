@@ -627,26 +627,31 @@ Requirements:
                 env.setdefault("ANTHROPIC_DEFAULT_HAIKU_MODEL", local_model_name)
 
             # Keep Claude SDK auth vars in sync using provider-specific source keys.
+            coding_api_key = str(self._model_config.get("coding_api_key") or "").strip()
             anthropic_api_key = os.getenv("ANTHROPIC_API_KEY") or ""
             anthropic_auth_token = os.getenv("ANTHROPIC_AUTH_TOKEN") or ""
             openai_api_key = os.getenv("OPENAI_API_KEY") or ""
 
             if self._provider == "anthropic":
                 # Anthropic routes must use Anthropic credentials, never OpenAI keys.
-                selected_key = anthropic_api_key or anthropic_auth_token
+                selected_key = coding_api_key or anthropic_api_key or anthropic_auth_token
                 if selected_key:
                     env["ANTHROPIC_API_KEY"] = selected_key
                     env["ANTHROPIC_AUTH_TOKEN"] = selected_key
             elif self._provider == "openai":
                 # OpenAI-routed Claude Code uses OPENAI_API_KEY via SDK internals.
-                if openai_api_key:
-                    env["OPENAI_API_KEY"] = openai_api_key
+                selected_key = coding_api_key or openai_api_key
+                if selected_key:
+                    env["OPENAI_API_KEY"] = selected_key
             else:
                 # Fallback sync for other providers that still use Anthropic-style auth.
                 if not env.get("ANTHROPIC_API_KEY") and env.get("ANTHROPIC_AUTH_TOKEN"):
                     env["ANTHROPIC_API_KEY"] = env["ANTHROPIC_AUTH_TOKEN"]
                 if not env.get("ANTHROPIC_AUTH_TOKEN") and env.get("ANTHROPIC_API_KEY"):
                     env["ANTHROPIC_AUTH_TOKEN"] = env["ANTHROPIC_API_KEY"]
+                if coding_api_key and not env.get("ANTHROPIC_API_KEY"):
+                    env["ANTHROPIC_API_KEY"] = coding_api_key
+                    env["ANTHROPIC_AUTH_TOKEN"] = coding_api_key
 
             # Set base URL override if provided in model config or environment.
             # project_manager.py sets ANTHROPIC_BASE_URL/ANTHROPIC_API_BASE from

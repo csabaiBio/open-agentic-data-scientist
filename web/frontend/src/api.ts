@@ -68,7 +68,7 @@ export async function fetchLlmModels(): Promise<LlmModel[]> {
   return res.json()
 }
 
-export async function createLlmModel(input: { type: LlmModelType; model_name: string; provider_url: string }): Promise<LlmModel> {
+export async function createLlmModel(input: { type: LlmModelType; model_name: string; provider_url: string; api_key?: string }): Promise<LlmModel> {
   const res = await fetch(`${BASE}/llm-models`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

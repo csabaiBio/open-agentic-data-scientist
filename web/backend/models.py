@@ -79,6 +79,9 @@ class ModelConfig(BaseModel):
     planning_api_base: Optional[str] = None  # API base URL for planning model
     review_api_base: Optional[str] = None    # API base URL for review model
     coding_api_base: Optional[str] = None    # API base URL for coding model
+    planning_api_key: Optional[str] = None   # API key override for planning model
+    review_api_key: Optional[str] = None     # API key override for review model
+    coding_api_key: Optional[str] = None     # API key override for coding model
 
 
 class ProjectCreate(BaseModel):
@@ -90,6 +93,9 @@ class ProjectCreate(BaseModel):
     max_cost_usd: Optional[float] = None
     llm_config: Optional[ModelConfig] = None
     base_project_id: Optional[str] = None  # inherit outputs from this project
+    planning_llm_model_id: Optional[int] = None
+    review_llm_model_id: Optional[int] = None
+    coding_llm_model_id: Optional[int] = None
 
 
 class Project(BaseModel):
@@ -115,6 +121,9 @@ class Project(BaseModel):
     discovery: Optional[DiscoveryResult] = None
     discovery_phase: Optional[str] = None  # current phase of discovery
     analysis_query: Optional[str] = None  # the research question (editable by user before analysis)
+    planning_llm_model_id: Optional[int] = None
+    review_llm_model_id: Optional[int] = None
+    coding_llm_model_id: Optional[int] = None
     # Model configuration
     llm_config: Optional[ModelConfig] = None
     # Persisted generated content
@@ -175,6 +184,7 @@ class LlmModelCreate(BaseModel):
     type: LlmModelType
     model_name: str
     provider_url: str
+    api_key: Optional[str] = None
 
 
 class LlmModel(BaseModel):
@@ -182,4 +192,15 @@ class LlmModel(BaseModel):
     type: LlmModelType
     model_name: str
     provider_url: str
+    has_api_key: bool = False
+    api_key_preview: Optional[str] = None
+    created_at: str
+
+
+class StoredLlmModel(BaseModel):
+    id: int
+    type: LlmModelType
+    model_name: str
+    provider_url: str
+    api_key: Optional[str] = None
     created_at: str

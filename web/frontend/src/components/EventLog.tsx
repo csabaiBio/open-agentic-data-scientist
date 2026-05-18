@@ -4,9 +4,31 @@ import remarkGfm from 'remark-gfm'
 import {
   Brain, MessageSquare, Terminal, AlertTriangle, Info,
   Wrench, ChevronDown, ChevronRight, Compass, Cpu, FlaskConical,
-  Eye, Pencil, Search as SearchIcon, Lightbulb, Coins
+  Eye, Pencil, Search as SearchIcon, Lightbulb, Coins, Clock
 } from 'lucide-react'
-import type { ProjectEvent } from '../types'
+import type { ProjectEvent, Stage } from '../types'
+
+type ParsedStage = {
+  index: number
+  title: string
+  description: string
+}
+
+type ParsedCriterion = {
+  criteria: string
+}
+
+type ParsedCriteriaUpdate = {
+  index: number | null
+  met: boolean
+  evidence: string
+}
+
+type StructuredPayload = {
+  stages: ParsedStage[]
+  successCriteria: ParsedCriterion[]
+  criteriaUpdates: ParsedCriteriaUpdate[]
+}
 
 /* ── Agent colour & icon mapping ─────────────────────────────── */
 
@@ -130,6 +152,32 @@ function formatUsd(value: number | null | undefined): string {
   }).format(amount)
 }
 
+function formatDuration(secs: number): string {
+  if (secs < 60) return `${Math.round(secs)}s`
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ${Math.round(secs % 60)}s`
+  return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`
+}
+
+function LiveDuration({ startedAt }: { startedAt: string }) {
+  const [elapsed, setElapsed] = useState(0)
+
+  useEffect(() => {
+    const start = new Date(startedAt).getTime()
+    const update = () => setElapsed(Math.max(0, (Date.now() - start) / 1000))
+    update()
+    const interval = setInterval(update, 1000)
+    return () => clearInterval(interval)
+  }, [startedAt])
+
+  return <>{formatDuration(elapsed)}</>
+}
+
+function toTimestampMs(value: string | null | undefined): number | null {
+  if (!value) return null
+  const time = new Date(value).getTime()
+  return Number.isFinite(time) ? time : null
+}
+
 function inferUsageStage(event: ProjectEvent): 'planning' | 'review' | 'coding' | null {
   const metaStage = String(
     event.metadata?.stage
@@ -153,6 +201,192 @@ function inferUsageStage(event: ProjectEvent): 'planning' | 'review' | 'coding' 
   if (model.includes('claude-code')) return 'coding'
 
   return null
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function readString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function parseStructuredPayload(content: string): StructuredPayload | null {
+  try {
+    const parsed: unknown = JSON.parse(content)
+    if (!isRecord(parsed)) return null
+
+    const stages = Array.isArray(parsed.stages)
+      ? parsed.stages
+        .filter(isRecord)
+        .map((stage, index) => ({
+          index,
+          title: readString(stage.title),
+          description: readString(stage.description),
+        }))
+        .filter(stage => stage.title || stage.description)
+      : []
+
+    const successCriteria = Array.isArray(parsed.success_criteria)
+      ? parsed.success_criteria
+        .filter(isRecord)
+        .map((criterion) => ({
+          criteria: readString(criterion.criteria),
+        }))
+        .filter(criterion => criterion.criteria)
+      : []
+
+    const criteriaUpdates = Array.isArray(parsed.criteria_updates)
+      ? parsed.criteria_updates
+        .filter(isRecord)
+        .map((update) => ({
+          index: typeof update.index === 'number' ? update.index : null,
+          met: update.met === true,
+          evidence: readString(update.evidence),
+        }))
+        .filter(update => update.index !== null || update.evidence)
+      : []
+
+    if (stages.length === 0 && successCriteria.length === 0 && criteriaUpdates.length === 0) {
+      return null
+    }
+
+    return { stages, successCriteria, criteriaUpdates }
+  } catch {
+    return null
+  }
+}
+
+function StageDurationBadge({ stage }: { stage?: Stage }) {
+  if (!stage) {
+    return <span className="text-xs text-gray-400">Not started</span>
+  }
+
+  if (stage.status === 'completed' && typeof stage.duration_seconds === 'number') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-emerald-700">
+        <Clock className="h-3 w-3" />
+        {formatDuration(stage.duration_seconds)}
+      </span>
+    )
+  }
+
+  if (stage.status === 'running' && stage.started_at) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-blue-600">
+        <Clock className="h-3 w-3" />
+        <LiveDuration startedAt={stage.started_at} />
+      </span>
+    )
+  }
+
+  if (typeof stage.duration_seconds === 'number' && stage.duration_seconds > 0) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+        <Clock className="h-3 w-3" />
+        {formatDuration(stage.duration_seconds)}
+      </span>
+    )
+  }
+
+  if (stage.status === 'failed' && stage.started_at && stage.completed_at) {
+    const elapsedSeconds = Math.max(0, (new Date(stage.completed_at).getTime() - new Date(stage.started_at).getTime()) / 1000)
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-red-600">
+        <Clock className="h-3 w-3" />
+        {formatDuration(elapsedSeconds)}
+      </span>
+    )
+  }
+
+  return <span className="text-xs text-gray-400">Pending</span>
+}
+
+function StructuredEventContent({ content, stages = [] }: { content: string; stages?: Stage[] }) {
+  const payload = parseStructuredPayload(content)
+
+  if (!payload) {
+    return <MarkdownContent content={content} />
+  }
+
+  const metCount = payload.criteriaUpdates.filter(update => update.met).length
+  const stageMap = new Map(stages.map(stage => [stage.index, stage]))
+
+  return (
+    <div className="space-y-4 text-sm text-gray-700">
+      {payload.stages.length > 0 && (
+        <section className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-indigo-600">Stages</span>
+            <span className="text-xs text-gray-400">{payload.stages.length} total</span>
+          </div>
+          <div className="space-y-2">
+            {payload.stages.map((stage, index) => (
+              <div key={`${stage.title}-${index}`} className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-3">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-white text-xs font-semibold text-indigo-700 border border-indigo-200">
+                    {index + 1}
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="font-semibold text-gray-900">{stage.title || `Stage ${index + 1}`}</div>
+                      <StageDurationBadge stage={stageMap.get(stage.index)} />
+                    </div>
+                    {stage.description && (
+                      <p className="leading-6 text-gray-600">{stage.description}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {payload.successCriteria.length > 0 && (
+        <section className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-600">Success Criteria</span>
+            <span className="text-xs text-gray-400">{payload.successCriteria.length} checks</span>
+          </div>
+          <div className="space-y-2">
+            {payload.successCriteria.map((criterion, index) => (
+              <div key={`${criterion.criteria}-${index}`} className="flex items-start gap-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
+                <div className="mt-1 h-2 w-2 flex-shrink-0 rounded-full bg-emerald-500" />
+                <p className="leading-6 text-gray-700">{criterion.criteria}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {payload.criteriaUpdates.length > 0 && (
+        <section className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-600">Criteria Review</span>
+            <span className="text-xs text-gray-400">{metCount}/{payload.criteriaUpdates.length} met</span>
+          </div>
+          <div className="space-y-2">
+            {payload.criteriaUpdates.map((update, index) => (
+              <div key={`${update.index ?? index}-${update.evidence}`} className="rounded-xl border border-amber-100 bg-amber-50/60 p-3">
+                <div className="flex items-center gap-2">
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${update.met ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {update.met ? 'Met' : 'Not Met'}
+                  </span>
+                  <span className="text-xs font-medium text-gray-500">
+                    Criterion {typeof update.index === 'number' ? update.index + 1 : index + 1}
+                  </span>
+                </div>
+                {update.evidence && (
+                  <p className="mt-2 leading-6 text-gray-600">{update.evidence}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  )
 }
 
 /* ── Markdown renderer with Tailwind prose classes ───────────── */
@@ -182,7 +416,7 @@ function MarkdownContent({ content, className = '' }: { content: string; classNa
 
 /* ── Single event card ────────────────────────────────────────── */
 
-function EventCard({ event }: { event: ProjectEvent }) {
+function EventCard({ event, stages, previousUsageTimestamp }: { event: ProjectEvent; stages?: Stage[]; previousUsageTimestamp?: string }) {
   const [expanded, setExpanded] = useState(true)
   const isLong = event.content.length > 200
   const agentStyle = getAgentStyle(event.author || '')
@@ -226,6 +460,11 @@ function EventCard({ event }: { event: ProjectEvent }) {
     const model = typeof event.metadata?.model === 'string' ? event.metadata.model : event.content
     const llmCallIndex = typeof event.metadata?.llm_call_index === 'number' ? event.metadata.llm_call_index : null
     const usageStage = inferUsageStage(event)
+    const currentUsageMs = toTimestampMs(event.timestamp)
+    const previousUsageMs = toTimestampMs(previousUsageTimestamp)
+    const elapsedSincePreviousUsage = currentUsageMs !== null && previousUsageMs !== null
+      ? Math.max(0, (currentUsageMs - previousUsageMs) / 1000)
+      : null
 
     return (
       <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-100 animate-fade-in">
@@ -252,6 +491,12 @@ function EventCard({ event }: { event: ProjectEvent }) {
             {!!usage.cached_input_tokens && <span>cached: {usage.cached_input_tokens}</span>}
             <span>total: {usage.total_tokens ?? 0}</span>
             {totalCostUsd !== null && <span>project total: {formatUsd(totalCostUsd)}</span>}
+            {elapsedSincePreviousUsage !== null && (
+              <span className="inline-flex items-center gap-1 text-xs text-emerald-700">
+                <Clock className="h-3 w-3" />
+                since last call: {formatDuration(elapsedSincePreviousUsage)}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -325,7 +570,7 @@ function EventCard({ event }: { event: ProjectEvent }) {
       {/* Content */}
       {(expanded || !isLong) && (
         <div className="px-4 py-3 bg-white">
-          <MarkdownContent content={event.content} />
+          <StructuredEventContent content={event.content} stages={stages} />
         </div>
       )}
     </div>
@@ -334,7 +579,7 @@ function EventCard({ event }: { event: ProjectEvent }) {
 
 /* ── Main component ───────────────────────────────────────────── */
 
-export default function EventLog({ events }: { events: ProjectEvent[] }) {
+export default function EventLog({ events, stages = [] }: { events: ProjectEvent[]; stages?: Stage[] }) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -343,6 +588,16 @@ export default function EventLog({ events }: { events: ProjectEvent[] }) {
 
   // Filter tool_results (they are verbose and not useful to the user)
   const filtered = events.filter(e => e.type !== 'tool_result')
+  const previousUsageTimestampById = new Map<number, string>()
+  let lastUsageTimestamp: string | null = null
+
+  for (const event of filtered) {
+    if (event.type !== 'usage') continue
+    if (lastUsageTimestamp) {
+      previousUsageTimestampById.set(event.id, lastUsageTimestamp)
+    }
+    lastUsageTimestamp = event.timestamp
+  }
 
   if (filtered.length === 0) {
     return (
@@ -356,7 +611,12 @@ export default function EventLog({ events }: { events: ProjectEvent[] }) {
   return (
     <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
       {filtered.map((event) => (
-        <EventCard key={event.id} event={event} />
+        <EventCard
+          key={event.id}
+          event={event}
+          stages={stages}
+          previousUsageTimestamp={previousUsageTimestampById.get(event.id)}
+        />
       ))}
       <div ref={bottomRef} />
     </div>

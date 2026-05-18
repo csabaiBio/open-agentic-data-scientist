@@ -130,13 +130,16 @@ export default function Dashboard() {
   const [newLlmType, setNewLlmType] = useState<LlmModelType>('openai')
   const [newLlmModelName, setNewLlmModelName] = useState('')
   const [newLlmProviderUrl, setNewLlmProviderUrl] = useState('')
+  const [newLlmApiKey, setNewLlmApiKey] = useState('')
   const [creatingLlmModel, setCreatingLlmModel] = useState(false)
+  const [modelSettingsNeedsAttention, setModelSettingsNeedsAttention] = useState(false)
   const [planningModel, setPlanningModel] = useState('')
   const [reviewModel, setReviewModel] = useState('')
   const [codingModel, setCodingModel] = useState('')
   const [maxCostUsd, setMaxCostUsd] = useState<number | ''>('')
   const [baseProjectId, setBaseProjectId] = useState<string>('')
   const [nowMs, setNowMs] = useState(Date.now())
+  const yearsBack = Math.max(1, Math.round(daysBack / 365))
 
   const load = useCallback(async () => {
     try {
@@ -188,6 +191,7 @@ export default function Dashboard() {
   }
 
   const applySelectedModelToRole = useCallback((role: 'planning' | 'review' | 'coding', modelId: number | '') => {
+    setModelSettingsNeedsAttention(false)
     if (role === 'planning') {
       setPlanningLlmModelId(modelId)
       setPlanningModel(typeof modelId === 'number' ? (llmModels.find(m => m.id === modelId)?.model_name ?? '') : '')
@@ -205,18 +209,22 @@ export default function Dashboard() {
   const handleCreateLlmModel = async () => {
     const modelName = newLlmModelName.trim()
     const providerUrl = newLlmProviderUrl.trim()
+    const apiKey = newLlmApiKey.trim()
     if (!modelName || !providerUrl) return
 
     setCreatingLlmModel(true)
+    setModelSettingsNeedsAttention(false)
     try {
       const created = await createLlmModel({
         type: newLlmType,
         model_name: modelName,
         provider_url: providerUrl,
+        ...(apiKey ? { api_key: apiKey } : {}),
       })
       setLlmModels(prev => [...prev, created].sort((a, b) => `${a.type}:${a.model_name}`.localeCompare(`${b.type}:${b.model_name}`)))
       setNewLlmModelName('')
       setNewLlmProviderUrl('')
+      setNewLlmApiKey('')
     } catch (e) {
       console.error('Failed to create LLM model:', e)
       alert('Failed to add LLM model')
@@ -345,6 +353,7 @@ export default function Dashboard() {
   const handleCreate = async () => {
     if (!query.trim()) return
     setCreating(true)
+    setModelSettingsNeedsAttention(false)
     try {
       const project = await createProject({
         query, mode, files, numPapers, daysBack,
@@ -357,7 +366,12 @@ export default function Dashboard() {
       navigate(`/project/${project.id}`)
     } catch (e) {
       console.error('Failed to create project:', e)
-      alert('Failed to create project. Check the console for details.')
+      const errorMessage = e instanceof Error ? e.message : String(e)
+      if (/Selected\s+(planning|review|coding)\s+model\s+not\s+found/i.test(errorMessage)) {
+        setShowModelSettings(true)
+        setModelSettingsNeedsAttention(true)
+      }
+      alert(`Error: ${errorMessage}`)
     } finally {
       setCreating(false)
     }
@@ -564,15 +578,15 @@ export default function Dashboard() {
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-sm text-gray-600">Look back period</label>
-                    <span className="text-sm font-semibold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-md">{daysBack} days</span>
+                    <span className="text-sm font-semibold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-md">{yearsBack} year{yearsBack === 1 ? '' : 's'}</span>
                   </div>
                   <input
-                    type="range" min={1} max={180} value={daysBack}
-                    onChange={(e) => setDaysBack(Number(e.target.value))}
+                    type="range" min={1} max={30} value={yearsBack}
+                    onChange={(e) => setDaysBack(Number(e.target.value) * 365)}
                     className="w-full h-1.5 rounded-full bg-violet-200 appearance-none cursor-pointer accent-violet-600"
                   />
                   <div className="flex justify-between text-[10px] text-gray-400 mt-0.5">
-                    <span>1d</span><span>30d</span><span>90d</span><span>180d</span>
+                    <span>1y</span><span>3y</span><span>5y</span><span>10y</span>
                   </div>
                 </div>
                 <p className="text-xs text-violet-600/70 leading-relaxed">
@@ -596,139 +610,198 @@ export default function Dashboard() {
               </button>
               {showModelSettings && (
                 <div className="px-4 pb-4 space-y-4 border-t border-gray-100 animate-fade-in">
-                  <div className="pt-3 text-[11px] text-gray-500">
-                    Models are stored in SQLite with three fields: type, model_name, and provider_url.
-                  </div>
+                  <div className={`rounded-xl border p-3.5 space-y-3 ${modelSettingsNeedsAttention ? 'border-rose-300 bg-rose-50/70' : 'border-gray-200 bg-gray-100/80'}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full ${modelSettingsNeedsAttention ? 'bg-rose-100 text-rose-700' : 'bg-gray-200 text-gray-600'}`}>
+                        {modelSettingsNeedsAttention ? 'Action Needed' : 'SQLite Registry'}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-gray-500">
+                      Models are stored in SQLite with type, model name, provider URL, and an optional provider API key that stays on the backend.
+                    </div>
 
-                  <div className="rounded-lg border border-gray-200 p-3 space-y-2">
-                    <div className="text-xs font-medium text-gray-600">Add LLM Model</div>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-                      <select
-                        value={newLlmType}
-                        onChange={(e) => setNewLlmType(e.target.value as LlmModelType)}
-                        className="px-2.5 py-2 rounded-lg border border-gray-200 text-sm bg-white"
+                    <div className={`rounded-lg border bg-white p-3 space-y-2 ${modelSettingsNeedsAttention ? 'border-rose-300' : 'border-gray-200'}`}>
+                      <div className="text-xs font-medium text-gray-600">Add LLM Model</div>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                        <select
+                          value={newLlmType}
+                          onChange={(e) => {
+                            setModelSettingsNeedsAttention(false)
+                            setNewLlmType(e.target.value as LlmModelType)
+                          }}
+                          className="px-2.5 py-2 rounded-lg border border-gray-200 text-sm bg-white"
+                        >
+                          <option value="openai">openai</option>
+                          <option value="anthropic">anthropic</option>
+                          <option value="local">local</option>
+                        </select>
+                        <input
+                          value={newLlmProviderUrl}
+                          onChange={(e) => {
+                            setModelSettingsNeedsAttention(false)
+                            setNewLlmProviderUrl(e.target.value)
+                          }}
+                          placeholder="provider_url"
+                          className="px-3 py-2 rounded-lg border border-gray-200 text-sm"
+                        />
+                        <input
+                          value={newLlmModelName}
+                          onChange={(e) => {
+                            setModelSettingsNeedsAttention(false)
+                            setNewLlmModelName(e.target.value)
+                          }}
+                          placeholder="model_name"
+                          className="px-3 py-2 rounded-lg border border-gray-200 text-sm"
+                        />
+                        <input
+                          type="password"
+                          value={newLlmApiKey}
+                          onChange={(e) => {
+                            setModelSettingsNeedsAttention(false)
+                            setNewLlmApiKey(e.target.value)
+                          }}
+                          placeholder="provider_api_key (optional)"
+                          className="px-3 py-2 rounded-lg border border-gray-200 text-sm"
+                        />
+                      </div>
+                      <div className="text-[10px] text-gray-400">
+                        Use this when a saved provider should run with its own key instead of the server-wide environment key. The raw key is not returned to the browser after save.
+                      </div>
+                      <button
+                        onClick={handleCreateLlmModel}
+                        disabled={creatingLlmModel || !newLlmModelName.trim() || !newLlmProviderUrl.trim()}
+                        className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                       >
-                        <option value="openai">openai</option>
-                        <option value="anthropic">anthropic</option>
-                        <option value="local">local</option>
-                      </select>
-                      <input
-                        value={newLlmProviderUrl}
-                        onChange={(e) => setNewLlmProviderUrl(e.target.value)}
-                        placeholder="provider_url"
-                        className="px-3 py-2 rounded-lg border border-gray-200 text-sm"
-                      />
-                      <input
-                        value={newLlmModelName}
-                        onChange={(e) => setNewLlmModelName(e.target.value)}
-                        placeholder="model_name"
-                        className="px-3 py-2 rounded-lg border border-gray-200 text-sm"
-                      />                    
-                      </div>
-                    <button
-                      onClick={handleCreateLlmModel}
-                      disabled={creatingLlmModel || !newLlmModelName.trim() || !newLlmProviderUrl.trim()}
-                      className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      {creatingLlmModel ? 'Adding...' : 'Add model'}
-                    </button>
-                  </div>
+                        {creatingLlmModel ? 'Adding...' : 'Add model'}
+                      </button>
+                    </div>
 
-                  <div className="space-y-2">
-                    {mode !== 'simple' && (
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Planning Model</label>
-                        <select
-                          value={planningLlmModelId}
-                          onChange={(e) => applySelectedModelToRole('planning', e.target.value ? Number(e.target.value) : '')}
-                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"
-                        >
-                          <option value="">Select planning model</option>
+                    <div className="space-y-1">
+                      <div className="text-xs font-medium text-gray-500">Saved Models</div>
+                      {llmModelsLoading ? (
+                        <div className="text-xs text-gray-400">Loading models...</div>
+                      ) : llmModels.length === 0 ? (
+                        <div className="text-xs text-gray-400">No saved models yet.</div>
+                      ) : (
+                        <div className="space-y-1 max-h-44 overflow-auto">
                           {llmModels.map(model => (
-                            <option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                    {mode !== 'simple' && (
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Review Model</label>
-                        <select
-                          value={reviewLlmModelId}
-                          onChange={(e) => applySelectedModelToRole('review', e.target.value ? Number(e.target.value) : '')}
-                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"
-                        >
-                          <option value="">Select review model</option>
-                          {llmModels.map(model => (
-                            <option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                    {mode !== 'discovery' && (
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Coding Model</label>
-                        <select
-                          value={codingLlmModelId}
-                          onChange={(e) => applySelectedModelToRole('coding', e.target.value ? Number(e.target.value) : '')}
-                          className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"
-                        >
-                          <option value="">Select coding model</option>
-                          {llmModels.map(model => (
-                            <option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="text-xs font-medium text-gray-500">Saved Models</div>
-                    {llmModelsLoading ? (
-                      <div className="text-xs text-gray-400">Loading models...</div>
-                    ) : llmModels.length === 0 ? (
-                      <div className="text-xs text-gray-400">No saved models yet.</div>
-                    ) : (
-                      <div className="space-y-1 max-h-44 overflow-auto">
-                        {llmModels.map(model => (
-                          <div key={model.id} className="flex items-center justify-between rounded-lg border border-gray-200 px-2.5 py-1.5">
-                            <div className="min-w-0">
-                              <div className="text-xs text-gray-700 truncate">{model.type} | {model.model_name}</div>
-                              <div className="text-[10px] text-gray-400 truncate">{model.provider_url}</div>
+                            <div key={model.id} className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-2.5 py-1.5">
+                              <div className="min-w-0">
+                                <div className="text-xs text-gray-700 truncate flex items-center gap-1.5">
+                                  <span>{model.type} | {model.model_name}</span>
+                                  {model.has_api_key && (
+                                    <span className="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-medium text-emerald-700">
+                                      key saved{model.api_key_preview ? ` (${model.api_key_preview})` : ''}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] text-gray-400 truncate">{model.provider_url}</div>
+                              </div>
+                              <button
+                                onClick={() => handleDeleteLlmModel(model.id)}
+                                className="text-[10px] text-red-500 hover:text-red-600 px-2 py-0.5 rounded"
+                              >
+                                Delete
+                              </button>
                             </div>
-                            <button
-                              onClick={() => handleDeleteLlmModel(model.id)}
-                              className="text-[10px] text-red-500 hover:text-red-600 px-2 py-0.5 rounded"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">
-                      Max Cost (USD) <span className="text-gray-300">(optional stop limit)</span>
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={maxCostUsd}
-                      onChange={e => {
-                        const value = e.target.value
-                        setMaxCostUsd(value === '' ? '' : Math.max(0, Number(value)))
-                      }}
-                      placeholder="e.g. 2.50"
-                      className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
-                    />
-                    <p className="text-[10px] text-gray-400 mt-1">
-                      Project stops automatically once total LLM cost reaches this amount.
-                    </p>
+                  <div className={`rounded-xl border p-3.5 space-y-3 ${modelSettingsNeedsAttention ? 'border-rose-300 bg-rose-50/70' : 'border-gray-200 bg-gray-100/80'}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-700">Model Selection</div>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full ${modelSettingsNeedsAttention ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'}`}>
+                        {modelSettingsNeedsAttention ? 'Select valid model' : 'Role Assignment'}
+                      </span>
+                    </div>
+                    {modelSettingsNeedsAttention && (
+                      <div className="text-[11px] text-rose-700 bg-rose-100 border border-rose-200 rounded-md px-2 py-1">
+                        The selected model was not found. Add it again or choose another saved model before starting analysis.
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      {mode !== 'simple' && (
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Planning Model</label>
+                          <select
+                            value={planningLlmModelId}
+                            onChange={(e) => applySelectedModelToRole('planning', e.target.value ? Number(e.target.value) : '')}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"
+                          >
+                            <option value="">Select planning model</option>
+                            {llmModels.map(model => (
+                              <option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {mode !== 'simple' && (
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Review Model</label>
+                          <select
+                            value={reviewLlmModelId}
+                            onChange={(e) => applySelectedModelToRole('review', e.target.value ? Number(e.target.value) : '')}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"
+                          >
+                            <option value="">Select review model</option>
+                            {llmModels.map(model => (
+                              <option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {mode !== 'discovery' && (
+                        <div>
+                          <label className="block text-xs font-medium text-gray-500 mb-1">Coding Model</label>
+                          <select
+                            value={codingLlmModelId}
+                            onChange={(e) => applySelectedModelToRole('coding', e.target.value ? Number(e.target.value) : '')}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"
+                          >
+                            <option value="">Select coding model</option>
+                            {llmModels.map(model => (
+                              <option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>
+                            ))}
+                          </select>
+                          <p className="text-[10px] text-gray-400 mt-1">
+                            If no saved coding model is selected, default is <span className="font-medium text-gray-500">claude-sonnet-4-5</span>.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-gray-200 bg-gray-100/80 p-3.5 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-700">Cost Limit</div>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Budget Guardrail</span>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">
+                        Max Cost (USD) <span className="text-gray-300">(optional stop limit)</span>
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={maxCostUsd}
+                        onChange={e => {
+                          const value = e.target.value
+                          setMaxCostUsd(value === '' ? '' : Math.max(0, Number(value)))
+                        }}
+                        placeholder="e.g. 2.50"
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none"
+                      />
+                      <p className="text-[10px] text-gray-400 mt-1">
+                        Project stops automatically once total LLM cost reaches this amount.
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}
@@ -850,9 +923,6 @@ export default function Dashboard() {
                       <Clock className="w-3 h-3" />
                       {timeAgo(p.created_at)}
                     </span>
-                    {getElapsedSeconds(p) !== null && (
-                      <span>Elapsed: {formatDuration(getElapsedSeconds(p))}</span>
-                    )}
                     {p.stages_total > 0 && (
                       <span>Stages: {p.stages_completed}/{p.stages_total}</span>
                     )}
@@ -864,6 +934,12 @@ export default function Dashboard() {
                       <Coins className="w-3 h-3" />
                       {formatUsd(p.total_cost_usd)}
                     </span>
+                    {(p.status === 'completed' || p.status === 'stopped' || p.status === 'failed') && getElapsedSeconds(p) !== null && (
+                      <span className="flex items-center gap-1 text-gray-400">
+                        <Clock className="w-3 h-3" />
+                        {formatDuration(getElapsedSeconds(p))}
+                      </span>
+                    )}
                     {typeof p.max_cost_usd === 'number' && p.max_cost_usd > 0 && (
                       <span className="flex items-center gap-1 text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-md">
                         Limit: {formatUsd(p.max_cost_usd)}

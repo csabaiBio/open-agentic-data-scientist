@@ -2,12 +2,13 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, StopCircle, FileText, Image, ScrollText, Loader2,
-  Clock, BookOpen, Download, RefreshCw, BarChart3, Compass, Cpu, FlaskConical, Zap, GitBranch, Coins
+  Clock, BookOpen, Download, RefreshCw, BarChart3, Compass, Cpu, FlaskConical, Zap, GitBranch, Coins,
+  Activity, Terminal, Globe, Bot, AlertTriangle
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { fetchProject, stopProject, resumeProject, updateProjectCostLimit, generatePaper, getPaperPdfUrl, confirmDiscovery, subscribeToEvents } from '../api'
-import type { Project, ProjectEvent } from '../types'
+import type { Project, ProjectEvent, Stage } from '../types'
 import StatusBadge from '../components/StatusBadge'
 import StageProgress from '../components/StageProgress'
 import EventLog from '../components/EventLog'
@@ -37,6 +38,213 @@ function formatUsd(value: number | null | undefined): string {
   }).format(amount)
 }
 
+function formatRelativeTime(iso: string | null, nowMs: number): string {
+  if (!iso) return 'unknown'
+  const timestamp = new Date(iso).getTime()
+  if (!Number.isFinite(timestamp)) return 'unknown'
+  const diffSecs = Math.max(0, Math.round((nowMs - timestamp) / 1000))
+  return `${formatDuration(diffSecs)} ago`
+}
+
+type ActivitySummary = {
+  label: string
+  detail: string
+  tone: 'neutral' | 'active' | 'network' | 'warning'
+  timestamp: string | null
+}
+
+function extractToolCallSummary(event: ProjectEvent): ActivitySummary {
+  const args = event.metadata?.arguments || {}
+  const command = typeof args.command === 'string' ? args.command.trim() : ''
+  const description = typeof args.description === 'string' ? args.description.trim() : ''
+  const toolName = String(event.content || '').trim()
+  const haystack = `${toolName} ${description} ${command}`.toLowerCase()
+  const detail = description || command || toolName || 'Running tool'
+
+  if (/(curl|wget|http|https|fetch|download|pubmed|encode|requests?\.|web|browser)/i.test(haystack)) {
+    return {
+      label: 'Fetching external resources',
+      detail,
+      tone: 'network',
+      timestamp: event.timestamp,
+    }
+  }
+
+  if (toolName === 'Bash') {
+    return {
+      label: 'Running script or shell command',
+      detail,
+      tone: 'active',
+      timestamp: event.timestamp,
+    }
+  }
+
+  return {
+    label: `Running ${toolName || 'tool'}`,
+    detail,
+    tone: 'active',
+    timestamp: event.timestamp,
+  }
+}
+
+function extractActivitySummary(events: ProjectEvent[], runningStage: Stage | undefined): ActivitySummary {
+  const meaningful = [...events].reverse().find(event => {
+    if (event.type === 'tool_result' || event.type === 'thought') return false
+    if (event.type === 'message' && !event.content.trim()) return false
+    return true
+  })
+
+  if (!meaningful) {
+    return {
+      label: 'Waiting for first activity',
+      detail: runningStage ? `Stage ${runningStage.index + 1}: ${runningStage.title}` : 'Project is queued and waiting to start.',
+      tone: 'neutral',
+      timestamp: null,
+    }
+  }
+
+  if (meaningful.type === 'tool_call') {
+    return extractToolCallSummary(meaningful)
+  }
+
+  if (meaningful.type === 'usage') {
+    return {
+      label: 'Waiting on model response',
+      detail: typeof meaningful.metadata?.model === 'string' ? meaningful.metadata.model : meaningful.content || 'LLM call in progress',
+      tone: 'active',
+      timestamp: meaningful.timestamp,
+    }
+  }
+
+  if (meaningful.type === 'status') {
+    return {
+      label: 'Updating workflow status',
+      detail: meaningful.content || 'Status update received',
+      tone: 'neutral',
+      timestamp: meaningful.timestamp,
+    }
+  }
+
+  if (meaningful.type === 'error') {
+    return {
+      label: 'Execution error',
+      detail: meaningful.content || 'The workflow reported an error.',
+      tone: 'warning',
+      timestamp: meaningful.timestamp,
+    }
+  }
+
+  const author = meaningful.author.replace(/_/g, ' ').trim()
+  const content = meaningful.content.trim().replace(/\s+/g, ' ')
+  return {
+    label: author ? `${author} activity` : 'Workflow activity',
+    detail: content || 'Processing current step',
+    tone: 'neutral',
+    timestamp: meaningful.timestamp,
+  }
+}
+
+function getStageDurationLabel(stage: Stage | undefined, nowMs: number): string | null {
+  if (!stage) return null
+
+  if (typeof stage.duration_seconds === 'number' && stage.duration_seconds >= 0) {
+    return formatDuration(stage.duration_seconds)
+  }
+
+  if (stage.started_at) {
+    const startedMs = new Date(stage.started_at).getTime()
+    if (Number.isFinite(startedMs)) {
+      return formatDuration(Math.max(0, (nowMs - startedMs) / 1000))
+    }
+  }
+
+  return null
+}
+
+function LiveActivityCard({
+  events,
+  stages,
+  isRunning,
+  nowMs,
+}: {
+  events: ProjectEvent[]
+  stages: Stage[]
+  isRunning: boolean
+  nowMs: number
+}) {
+  const runningStage = stages.find(stage => stage.status === 'running')
+  const pendingStage = stages.find(stage => stage.status === 'pending')
+  const activity = extractActivitySummary(events, runningStage)
+  const stageDurationText = getStageDurationLabel(runningStage, nowMs)
+  const lastUpdateText = formatRelativeTime(activity.timestamp, nowMs)
+  const lastUpdateMs = activity.timestamp ? new Date(activity.timestamp).getTime() : NaN
+  const secondsSinceUpdate = Number.isFinite(lastUpdateMs) ? Math.max(0, Math.round((nowMs - lastUpdateMs) / 1000)) : null
+  const isStale = isRunning && secondsSinceUpdate !== null && secondsSinceUpdate >= 30
+
+  const toneClasses = {
+    neutral: 'border-sky-100 bg-sky-50/70 text-sky-700',
+    active: 'border-emerald-100 bg-emerald-50/70 text-emerald-700',
+    network: 'border-violet-100 bg-violet-50/70 text-violet-700',
+    warning: 'border-amber-200 bg-amber-50/80 text-amber-800',
+  } as const
+
+  const toneIcon = {
+    neutral: Activity,
+    active: Terminal,
+    network: Globe,
+    warning: AlertTriangle,
+  } as const
+
+  const ToneIcon = toneIcon[isStale ? 'warning' : activity.tone]
+  const toneClassName = toneClasses[isStale ? 'warning' : activity.tone]
+
+  return (
+    <div className="glass-card p-5 lg:col-span-3">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+            <Activity className="w-4 h-4 text-brand-500" />
+            Current Activity
+            {isRunning && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+            <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 font-medium ${toneClassName}`}>
+              <ToneIcon className="w-3.5 h-3.5" />
+              {isStale ? 'No recent update' : activity.label}
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-gray-600">
+              <BarChart3 className="w-3.5 h-3.5" />
+              {runningStage
+                ? `Stage ${runningStage.index + 1}: ${runningStage.title}`
+                : pendingStage
+                ? `Next: Stage ${pendingStage.index + 1}: ${pendingStage.title}`
+                : 'No active stage'}
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-gray-500">
+              <Clock className="w-3.5 h-3.5" />
+              Last update {lastUpdateText}
+            </span>
+            {stageDurationText && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-gray-500">
+                <Clock className="w-3.5 h-3.5" />
+                Step duration {stageDurationText}
+              </span>
+            )}
+          </div>
+          <p className="mt-3 text-sm leading-relaxed text-gray-600 break-words">
+            {isStale
+              ? 'The workflow has not emitted a new event recently. It may still be inside a long-running script, network request, or model call.'
+              : activity.detail}
+          </p>
+        </div>
+        <div className="hidden sm:flex h-11 w-11 items-center justify-center rounded-2xl bg-gray-100 text-gray-500">
+          {activity.tone === 'network' ? <Globe className="w-5 h-5" /> : activity.tone === 'active' ? <Terminal className="w-5 h-5" /> : <Bot className="w-5 h-5" />}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>()
   const [project, setProject] = useState<Project | null>(null)
@@ -51,6 +259,7 @@ export default function ProjectDetail() {
   const [costLimitInput, setCostLimitInput] = useState<string>('')
   const [paperContent, setPaperContent] = useState<string | null>(null)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+  const [nowMs, setNowMs] = useState(Date.now())
 
   // Load project data
   const loadProject = useCallback(async () => {
@@ -167,6 +376,12 @@ export default function ProjectDetail() {
     const interval = setInterval(loadProject, 10000)
     return () => clearInterval(interval)
   }, [project?.status, loadProject])
+
+  useEffect(() => {
+    if (!project || (project.status !== 'running' && project.status !== 'pending')) return
+    const interval = setInterval(() => setNowMs(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [project?.status])
 
   const handleStop = async () => {
     if (!id) return
@@ -486,6 +701,7 @@ export default function ProjectDetail() {
 
         {tab === 'progress' && (
           <>
+            <LiveActivityCard events={events} stages={project.stages} isRunning={isRunning} nowMs={nowMs} />
             {/* Stages + Skills panel */}
             <div className="lg:col-span-1 space-y-4">
               <div className="glass-card p-5">
@@ -595,7 +811,7 @@ export default function ProjectDetail() {
                   Activity Log
                   {isRunning && <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />}
                 </h3>
-                <EventLog events={events} />
+                <EventLog events={events} stages={project.stages} />
               </div>
             </div>
           </>
