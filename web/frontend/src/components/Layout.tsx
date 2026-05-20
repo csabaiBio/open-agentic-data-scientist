@@ -9,7 +9,7 @@ export default function Layout() {
     <div className="min-h-screen flex flex-col">
       {/* Top nav */}
       <header className="sticky top-0 z-50 bg-white/70 backdrop-blur-lg border-b border-gray-200/60">
-        <div className="max-w-7xl mx-auto px-6 h-14 flex items-center gap-4">
+        <div className="w-full px-6 h-14 flex items-center gap-4">
           <Link to="/" className="flex items-center gap-2.5 group">
             <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center shadow-sm">
               <FlaskConical className="w-4.5 h-4.5 text-white" />
@@ -39,7 +39,7 @@ export default function Layout() {
 
       {/* Content */}
       <main className="flex-1">
-        <div className="max-w-7xl mx-auto px-6 py-8">
+        <div className="w-full px-6 py-8">
           <Outlet />
         </div>
       </main>
