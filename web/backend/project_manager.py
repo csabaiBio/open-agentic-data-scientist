@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from dotenv import load_dotenv
+from agentic_data_scientist.core.checkpoint import ReadmeCheckpointStore
 
 load_dotenv(override=True)
 
@@ -174,6 +175,8 @@ class ProjectManager:
         self._projects: Dict[str, Project] = {}
         self._running_tasks: Dict[str, asyncio.Task] = {}
         self._event_queues: Dict[str, List[asyncio.Queue]] = {}
+        # project_id -> {question_id -> Future[str]}
+        self._pending_questions: Dict[str, Dict[str, asyncio.Future]] = {}
         self._load_existing_projects()
 
     def _build_runtime_model_config(self, project: Project) -> Optional[Dict[str, Any]]:
@@ -312,6 +315,7 @@ class ProjectManager:
             id=project_id,
             query=req.query,
             mode=req.mode,
+            human_in_the_loop=req.human_in_the_loop,
             status=ProjectStatus.PENDING,
             created_at=_now(),
             working_dir=str(self._get_project_working_dir(project_id)),
@@ -383,6 +387,153 @@ class ProjectManager:
 
         return project
 
+    def _run_resume_bootstrap(self, project_id: str, project: Project) -> None:
+        """Capture lightweight workspace context when resuming a project.
+
+        This intentionally does not block resume if anything fails.
+        """
+        self._emit_event(project_id, ProjectEvent(
+            type="status",
+            content="Resume bootstrap: reading README.md and listing project directories.",
+            author="system",
+            timestamp=_now(),
+            metadata={"phase": "resume_bootstrap"},
+        ))
+
+        try:
+            # Repo root from this file: web/backend/project_manager.py -> repo root
+            repo_root = Path(__file__).resolve().parents[2]
+            project_root = self.projects_dir / project_id
+            readme_path = repo_root / "README.md"
+
+            readme_excerpt = ""
+            if readme_path.exists():
+                try:
+                    readme_text = readme_path.read_text(encoding="utf-8")
+                    readme_excerpt = "\n".join(readme_text.splitlines()[:250])
+                except Exception as exc:
+                    readme_excerpt = f"[Could not read README.md: {exc}]"
+            else:
+                readme_excerpt = "[README.md not found at repository root]"
+
+            top_dirs: List[str] = []
+            for child in sorted(project_root.iterdir(), key=lambda p: p.name.lower()):
+                if child.is_dir() and not child.name.startswith("."):
+                    top_dirs.append(child.name)
+
+            bootstrap_dir = self._get_project_working_dir(project_id) / "resume_bootstrap"
+            bootstrap_dir.mkdir(parents=True, exist_ok=True)
+            bootstrap_file = bootstrap_dir / "context.md"
+
+            lines = [
+                "# Resume Bootstrap Context",
+                "",
+                f"Generated at: {_now()}",
+                f"Project root: {project_root}",
+                "",
+                "## Top-level Project Directories",
+            ]
+            if top_dirs:
+                lines.extend([f"- {name}" for name in top_dirs])
+            else:
+                lines.append("- [No top-level directories found]")
+
+            lines.extend([
+                "",
+                "## README.md (first 250 lines)",
+                "",
+                "```markdown",
+                readme_excerpt,
+                "```",
+                "",
+            ])
+
+            bootstrap_file.write_text("\n".join(lines), encoding="utf-8")
+
+            self._emit_event(project_id, ProjectEvent(
+                type="message",
+                content=(
+                    "Resume bootstrap complete. "
+                    f"Captured {len(top_dirs)} directories and README excerpt to "
+                    f"{bootstrap_file.relative_to(self._get_project_working_dir(project_id))}."
+                ),
+                author="system",
+                timestamp=_now(),
+                metadata={"phase": "resume_bootstrap", "directories_count": len(top_dirs)},
+            ))
+
+            self._scan_files(project)
+            self._save_project(project)
+        except Exception as exc:
+            logger.warning("Resume bootstrap failed for %s: %s", project_id, exc)
+            self._emit_event(project_id, ProjectEvent(
+                type="status",
+                content=f"Resume bootstrap warning: {exc}",
+                author="system",
+                timestamp=_now(),
+                metadata={"phase": "resume_bootstrap", "warning": True},
+            ))
+
+    def _emit_resume_checkpoint_summary(self, project_id: str) -> None:
+        """Read project checkpoint state from checkpoint.json and emit resume event with findings and files."""
+        working_dir = self._get_project_working_dir(project_id)
+        readme_path = working_dir / "README.md"
+
+        try:
+            checkpoint_store = ReadmeCheckpointStore(readme_path=readme_path)
+            checkpoint_state = checkpoint_store.load_resume_state()
+            latest_summary = checkpoint_state.get("latest_summary")
+
+            if not latest_summary:
+                self._emit_event(project_id, ProjectEvent(
+                    type="status",
+                    content="No prior checkpoint summary found in output/checkpoint.json.",
+                    author="system",
+                    timestamp=_now(),
+                    metadata={"phase": "resume", "checkpoint_summary_found": False},
+                ))
+                return
+
+            summary_text = str(latest_summary.get("summary") or "").strip() or "[empty summary]"
+            summary_timestamp = str(latest_summary.get("timestamp") or "")
+            pending_events = len(checkpoint_state.get("events_after_summary") or [])
+            findings = latest_summary.get("findings") or []
+            files = latest_summary.get("files") or []
+
+            suffix = ""
+            if pending_events:
+                suffix = f" ({pending_events} event(s) after that summary)"
+
+            metadata = {
+                "phase": "resume",
+                "checkpoint_summary_found": True,
+                "checkpoint_summary": summary_text,
+                "checkpoint_summary_timestamp": summary_timestamp,
+                "checkpoint_events_after_summary": pending_events,
+                "checkpoint_findings": findings[:5],  # Include top 5 findings
+                "checkpoint_files": files,  # Include file list
+            }
+
+            self._emit_event(project_id, ProjectEvent(
+                type="status",
+                content=(
+                    "Loaded checkpoint summary from output/checkpoint.json: "
+                    f"{summary_text}{suffix}"
+                ),
+                author="system",
+                timestamp=_now(),
+                metadata=metadata,
+            ))
+        except Exception as exc:
+            logger.warning("Failed to read resume checkpoint summary for %s: %s", project_id, exc)
+            self._emit_event(project_id, ProjectEvent(
+                type="status",
+                content=f"Checkpoint summary read warning: {exc}",
+                author="system",
+                timestamp=_now(),
+                metadata={"phase": "resume", "checkpoint_warning": True},
+            ))
+
     async def resume_project(self, project_id: str) -> bool:
         """Resume a stopped or failed project, re-running the analysis from scratch
         but keeping all previously generated files in the working directory."""
@@ -403,6 +554,7 @@ class ProjectManager:
         project.completed_at = None
         project.error = None
         
+        
         # For discovery mode, reset discovery phase to restart from scratch
         if project.mode == ProjectMode.DISCOVERY:
             project.discovery_phase = None
@@ -417,6 +569,11 @@ class ProjectManager:
             timestamp=_now(),
             metadata={"status": "running", "phase": "resume"},
         ))
+
+        self._emit_resume_checkpoint_summary(project_id)
+
+        # Lightweight bootstrap for simple checkpoint-style resume context.
+        # self._run_resume_bootstrap(project_id, project)
 
         # Scan working directory so existing files are immediately visible in the API
         self._scan_files(project)
@@ -458,6 +615,85 @@ class ProjectManager:
         queues = self._event_queues.get(project_id, [])
         if queue in queues:
             queues.remove(queue)
+
+    # ── Human-in-the-loop question handling ──────────────────────────────────
+
+    def make_ask_fn(self, project_id: str):
+        """Return an async ask_fn suitable for DataScientist's ask_fn parameter.
+        
+        The returned coroutine emits a 'user_question' event to the UI and then
+        blocks until the human submits an answer via answer_question().
+        A timeout of HUMAN_IN_THE_LOOP_TIMEOUT seconds (default 300) is applied.
+        """
+        timeout_secs = float(os.getenv("HUMAN_IN_THE_LOOP_TIMEOUT", "300"))
+
+        async def ask_fn(question_id: str, question: str) -> str:
+            loop = asyncio.get_event_loop()
+            future: asyncio.Future = loop.create_future()
+
+            # Register the pending question
+            if project_id not in self._pending_questions:
+                self._pending_questions[project_id] = {}
+            self._pending_questions[project_id][question_id] = future
+
+            # Emit a user_question event to the frontend
+            self._emit_event(project_id, ProjectEvent(
+                type="user_question",
+                content=question,
+                author="system",
+                timestamp=_now(),
+                metadata={
+                    "question_id": question_id,
+                    "timeout_secs": timeout_secs,
+                },
+            ))
+
+            try:
+                answer = await asyncio.wait_for(asyncio.shield(future), timeout=timeout_secs)
+                return answer
+            except asyncio.TimeoutError:
+                logger.warning("[ask_fn] Question %s timed out after %ss", question_id, timeout_secs)
+                self._emit_event(project_id, ProjectEvent(
+                    type="status",
+                    content=f"Question timed out after {int(timeout_secs)}s — proceeding with best judgment.",
+                    author="system",
+                    timestamp=_now(),
+                    metadata={"phase": "human_in_the_loop", "question_id": question_id, "timed_out": True},
+                ))
+                return "[No answer received within timeout — please proceed with best judgment]"
+            finally:
+                # Clean up the pending question entry
+                self._pending_questions.get(project_id, {}).pop(question_id, None)
+
+        return ask_fn
+
+    def answer_question(self, project_id: str, question_id: str, answer: str) -> bool:
+        """Resolve a pending question with the user's answer.
+
+        Returns True if the question was found and resolved, False otherwise.
+        """
+        future = self._pending_questions.get(project_id, {}).get(question_id)
+        if future is None or future.done():
+            return False
+        future.set_result(answer)
+        # Emit confirmation event so the frontend can mark the input as answered
+        self._emit_event(project_id, ProjectEvent(
+            type="user_answer",
+            content=answer,
+            author="user",
+            timestamp=_now(),
+            metadata={"question_id": question_id},
+        ))
+        return True
+
+    def get_pending_questions(self, project_id: str) -> List[dict]:
+        """Return a list of pending questions for a project."""
+        qs = self._pending_questions.get(project_id, {})
+        return [
+            {"question_id": qid}
+            for qid, fut in qs.items()
+            if not fut.done()
+        ]
 
     def _emit_event(self, project_id: str, event: ProjectEvent):
         """Emit an event to all subscribers and store it."""
@@ -738,12 +974,20 @@ class ProjectManager:
                 # Local Anthropic-compatible servers (e.g., Ollama) need this token.
                 if coding_provider == "local":
                     os.environ["ANTHROPIC_AUTH_TOKEN"] = "ollama"
+                # Azure-hosted Anthropic models use the same env var setup as local Anthropic
+                if coding_provider == "azure-anthropic":
+                    os.environ["ANTHROPIC_AUTH_TOKEN"] = coding_api_key or "ollama"
             if coding_api_key:
                 if coding_provider == "anthropic":
                     os.environ["ANTHROPIC_API_KEY"] = coding_api_key
                     os.environ["ANTHROPIC_AUTH_TOKEN"] = coding_api_key
+                elif coding_provider == "azure-anthropic":
+                    os.environ["ANTHROPIC_API_KEY"] = coding_api_key
+                    os.environ["ANTHROPIC_AUTH_TOKEN"] = coding_api_key
                 elif coding_provider == "openai":
                     os.environ["OPENAI_API_KEY"] = coding_api_key
+                elif coding_provider == "azure-openai":
+                    os.environ["AZURE_API_KEY"] = coding_api_key
                 elif coding_provider == "bedrock":
                     os.environ["AWS_BEDROCK_API_KEY"] = coding_api_key
                     os.environ["AWS_BEARER_TOKEN_BEDROCK"] = coding_api_key
@@ -754,11 +998,17 @@ class ProjectManager:
         logger.info("[TIMING] DataScientist import: %.3fs", _time.perf_counter() - _t0)
 
         _t1 = _time.perf_counter()
+        # Provide human-in-the-loop ask_fn when project setting and env allow it.
+        from agentic_data_scientist.tools.ask_user import is_human_in_the_loop_enabled
+        ask_fn = None
+        if project.human_in_the_loop and is_human_in_the_loop_enabled():
+            ask_fn = self.make_ask_fn(project_id)
         core = DataScientist(
             agent_type=agent_type,
             working_dir=str(working_dir),
             auto_cleanup=False,
             model_config=mc,
+            ask_fn=ask_fn,
         )
         logger.info("[TIMING] DataScientist() constructor: %.3fs", _time.perf_counter() - _t1)
 

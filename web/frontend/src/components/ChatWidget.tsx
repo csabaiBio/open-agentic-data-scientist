@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface Message {
   id: string;
@@ -28,15 +28,6 @@ const ChatWidget: React.FC<{ sidecarUrl?: string }> = ({ sidecarUrl = 'http://lo
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [connected, setConnected] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
 
   useEffect(() => {
     // Welcome message
@@ -201,7 +192,6 @@ const ChatWidget: React.FC<{ sidecarUrl?: string }> = ({ sidecarUrl = 'http://lo
               </div>
             </div>
           )}
-          <div ref={messagesEndRef} />
         </div>
 
         {/* Input */}

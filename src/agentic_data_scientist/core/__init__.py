@@ -1,6 +1,7 @@
 """Core API and session management for Agentic Data Scientist."""
 
 from agentic_data_scientist.core.api import DataScientist, FileInfo, Result, SessionConfig
+from agentic_data_scientist.core.checkpoint import ReadmeCheckpointStore
 from agentic_data_scientist.core.events import (
     CompletedEvent,
     ErrorEvent,
@@ -17,6 +18,7 @@ __all__ = [
     "Result",
     "SessionConfig",
     "FileInfo",
+    "ReadmeCheckpointStore",
     "MessageEvent",
     "FunctionCallEvent",
     "FunctionResponseEvent",

@@ -1,5 +1,6 @@
 """Unit tests for core API."""
 
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -94,6 +95,32 @@ class TestDataScientist:
         assert ds.working_dir.exists()
         ds.cleanup()
 
+    def test_checkpoint_env_configuration(self, monkeypatch, tmp_path):
+        """Checkpoint cadence and retention should be configurable from env vars."""
+        monkeypatch.setenv("CHECKPOINT_EVENT_INTERVAL", "7")
+        monkeypatch.setenv("CHECKPOINT_MAX_EVENTS", "80")
+        monkeypatch.setenv("CHECKPOINT_MAX_SUMMARIES", "5")
+
+        ds = DataScientist(agent_type="adk", working_dir=str(tmp_path))
+
+        assert ds._checkpoint_event_interval == 7
+        assert ds.checkpoint_store.max_events_to_keep == 80
+        assert ds.checkpoint_store.max_summaries_to_keep == 5
+        ds.cleanup()
+
+    def test_checkpoint_env_invalid_values_fallback(self, monkeypatch, tmp_path):
+        """Invalid or too-small env values should fall back or clamp safely."""
+        monkeypatch.setenv("CHECKPOINT_EVENT_INTERVAL", "0")
+        monkeypatch.setenv("CHECKPOINT_MAX_EVENTS", "not-an-int")
+        monkeypatch.setenv("CHECKPOINT_MAX_SUMMARIES", "-3")
+
+        ds = DataScientist(agent_type="adk", working_dir=str(tmp_path))
+
+        assert ds._checkpoint_event_interval == 1
+        assert ds.checkpoint_store.max_events_to_keep == 200
+        assert ds.checkpoint_store.max_summaries_to_keep == 1
+        ds.cleanup()
+
     def test_save_files_bytes(self, tmp_path):
         """Test saving files from bytes."""
         ds = DataScientist(agent_type="adk")
@@ -147,3 +174,57 @@ class TestDataScientist:
             assert ds.working_dir.exists()
 
         # Cleanup should have been called
+
+    @pytest.mark.asyncio
+    async def test_function_response_checkpoint_contains_response(self, monkeypatch, tmp_path):
+        """function_response checkpoint events should persist tool response payload."""
+
+        class DummyFunctionResponse:
+            def __init__(self, name, response):
+                self.name = name
+                self.response = response
+
+        class DummyPart:
+            def __init__(self, function_response):
+                self.text = None
+                self.function_call = None
+                self.function_response = function_response
+
+        class DummyContent:
+            def __init__(self, parts):
+                self.parts = parts
+
+        class DummyEvent:
+            def __init__(self):
+                self.author = "plan_maker_agent"
+                self.partial = False
+                self.content = DummyContent([
+                    DummyPart(DummyFunctionResponse("ask_user", {"response": "random number generator"})),
+                ])
+                self.usage_metadata = None
+
+        class DummyRunner:
+            async def run_async(self, **kwargs):
+                yield DummyEvent()
+
+        ds = DataScientist(agent_type="adk", working_dir=str(tmp_path))
+        ds.runner = DummyRunner()
+
+        checkpoint_events = []
+
+        def _capture_checkpoint_event(event_type, message, data=None):
+            checkpoint_events.append({"event_type": event_type, "message": message, "data": data or {}})
+
+        monkeypatch.setattr(ds, "_checkpoint_event", _capture_checkpoint_event)
+
+        streamed = [event async for event in ds._stream_responses("prompt", datetime.now())]
+
+        function_response_events = [e for e in streamed if e.get("type") == "function_response"]
+        assert function_response_events
+        assert function_response_events[0]["response"] == {"response": "random number generator"}
+
+        checkpoint_function_responses = [e for e in checkpoint_events if e["event_type"] == "function_response"]
+        assert checkpoint_function_responses
+        assert checkpoint_function_responses[0]["data"]["name"] == "ask_user"
+        assert checkpoint_function_responses[0]["data"]["response"] == {"response": "random number generator"}
+

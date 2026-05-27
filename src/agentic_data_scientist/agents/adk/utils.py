@@ -102,9 +102,99 @@ LOCAL_ENABLE_AUTO_TOOL_CHOICE = os.getenv("LOCAL_ENABLE_AUTO_TOOL_CHOICE", "fals
 AWS_BEDROCK_API_KEY = os.getenv("AWS_BEDROCK_API_KEY") or os.getenv("AWS_BEARER_TOKEN_BEDROCK")
 AWS_REGION_NAME = os.getenv("AWS_REGION_NAME", "us-east-1")
 
+# Azure OpenAI Foundry configuration (GPT models)
+# AZURE_FOUNDRY_URL should be the full Azure endpoint, e.g.:
+#   https://<resource>.openai.azure.com/
+AZURE_API_KEY = os.getenv("AZURE_API_KEY")
+AZURE_API_BASE = os.getenv("AZURE_API_BASE") or os.getenv("AZURE_URL")
+AZURE_API_VERSION = os.getenv("AZURE_API_VERSION", "2025-04-01-preview")
+
+# Azure OpenAI Foundry configuration (Anthropic Claude models)
+# AZURE_FOUNDRY_ANTHROPIC_URL is a separate endpoint for Claude models on Azure, e.g.:
+#   https://<resource>.mssprodazure.com/ or <azure-gateway-url>
+AZURE_ANTHROPIC_API_KEY = os.getenv("AZURE_ANTHROPIC_API_KEY") or AZURE_API_KEY
+AZURE_ANTHROPIC_URL = os.getenv("AZURE_ANTHROPIC_URL")
+
 # Provider is selected per call; environment only contributes credentials.
 
 logger.info("[AgenticDS] Provider config loaded from environment variables")
+
+
+def _setup_langsmith_tracing() -> None:
+    """Enable LangSmith tracing for ADK agents when a LangSmith key is set.
+
+    Uses the native google-adk integration via configure_google_adk() which
+    captures agent invocations, tool calls, and LLM interactions.
+
+    Required env vars:
+        LANGSMITH_API_KEY or LANGCHAIN_API_KEY – LangSmith API key
+    Optional env vars:
+        LANGSMITH_PROJECT  – project name in LangSmith UI
+                             (defaults to "agentic-data-scientist")
+        LANGSMITH_TRACING  – set to "true" to enable (auto-set here when key present)
+        LANGSMITH_ENDPOINT – for EU/self-hosted workspaces (optional)
+    """
+    api_key = os.getenv("LANGSMITH_API_KEY") or os.getenv("LANGCHAIN_API_KEY")
+    if not api_key:
+        return
+
+    project = os.getenv("LANGSMITH_PROJECT") or os.getenv("LANGCHAIN_PROJECT") or "agentic-data-scientist"
+    endpoint = os.getenv("LANGSMITH_ENDPOINT") or os.getenv("LANGCHAIN_ENDPOINT")
+
+    # Normalize env aliases explicitly to avoid stale process values.
+    os.environ["LANGSMITH_TRACING"] = os.getenv("LANGSMITH_TRACING") or "true"
+    os.environ["LANGSMITH_API_KEY"] = api_key
+    os.environ["LANGCHAIN_API_KEY"] = api_key
+    os.environ["LANGSMITH_PROJECT"] = project
+    os.environ["LANGCHAIN_PROJECT"] = project
+    if endpoint:
+        os.environ["LANGSMITH_ENDPOINT"] = endpoint
+        os.environ["LANGCHAIN_ENDPOINT"] = endpoint
+
+    resolved_endpoint = os.getenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+    key_suffix = api_key[-6:] if len(api_key) >= 6 else "<short>"
+
+    # Fast auth check — fail loudly before any agent work starts.
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(
+            f"{resolved_endpoint.rstrip('/')}/info",
+            headers={"x-api-key": api_key},
+        )
+        with urllib.request.urlopen(req, timeout=5):
+            pass  # 200 OK → credentials are valid
+        logger.info(
+            "[AgenticDS] LangSmith auth OK (endpoint=%s, key_suffix=%s)",
+            resolved_endpoint,
+            key_suffix,
+        )
+    except Exception as exc:
+        logger.error(
+            "[AgenticDS] LangSmith auth FAILED — tracing will be skipped. "
+            "Check LANGSMITH_API_KEY and LANGSMITH_ENDPOINT. "
+            "endpoint=%s, key_suffix=%s, error=%s",
+            resolved_endpoint,
+            key_suffix,
+            exc,
+        )
+        return
+
+    try:
+        from langsmith.integrations.google_adk import configure_google_adk
+
+        configure_google_adk(project_name=project)
+        logger.info(
+            "[AgenticDS] LangSmith ADK tracing enabled (project=%s, endpoint=%s, key_suffix=%s)",
+            project,
+            resolved_endpoint,
+            key_suffix,
+        )
+    except Exception as exc:
+        logger.warning("[AgenticDS] Failed to configure LangSmith ADK tracing: %s", exc)
+
+
+_setup_langsmith_tracing()
 
 # Export for use in event compression
 __all__ = [
@@ -143,6 +233,18 @@ if ANTHROPIC_API_KEY:
     os.environ["ANTHROPIC_API_KEY"] = ANTHROPIC_API_KEY
 if ANTHROPIC_API_BASE:
     os.environ["ANTHROPIC_API_BASE"] = ANTHROPIC_API_BASE
+if AZURE_API_KEY:
+    os.environ["AZURE_API_KEY"] = AZURE_API_KEY
+if AZURE_API_BASE:
+    os.environ["AZURE_API_BASE"] = AZURE_API_BASE
+if AZURE_ANTHROPIC_API_KEY:
+    os.environ["AZURE_ANTHROPIC_API_KEY"] = AZURE_ANTHROPIC_API_KEY
+else:
+    os.environ["AZURE_ANTHROPIC_API_KEY"] = AZURE_API_KEY
+if AZURE_ANTHROPIC_URL:
+    os.environ["AZURE_ANTHROPIC_API_BASE"] = AZURE_ANTHROPIC_URL
+else: 
+    os.environ["AZURE_ANTHROPIC_API_BASE"] = AZURE_API_BASE + "/anthropic/v1/messages"  # Fallback to shared URL if specific one not set
 
 _maybe_enable_litellm_debug()
 
@@ -156,6 +258,10 @@ def _normalize_model_name(provider: str, model_name: str) -> str:
 
     if provider == "openai" and model_name.startswith("openai/"):
         return model_name[len("openai/"):]
+    if provider == "azure-openai" and model_name.startswith("azure-openai/"):
+        return model_name[len("azure-openai/"):]
+    if provider == "azure-anthropic" and model_name.startswith("azure-anthropic/"):
+        return model_name[len("azure-anthropic/"):]
     if provider == "anthropic":
         if model_name.startswith("anthropic/"):
             model_name = model_name[len("anthropic/"):]
@@ -179,7 +285,7 @@ def _infer_provider_from_model_name(model_name: str) -> Optional[str]:
     if not model_name or "/" not in model_name:
         return None
     prefix = str(model_name).split("/", 1)[0].strip().lower()
-    if prefix in {"openai", "anthropic", "bedrock", "openrouter", "local"}:
+    if prefix in {"openai", "anthropic", "bedrock", "openrouter", "local", "azure-openai", "azure-anthropic"}:
         return prefix
     if prefix in {"ollama", "huggingface"}:
         return "local"
@@ -331,6 +437,16 @@ def _resolve_provider_defaults(provider: str) -> tuple[Optional[str], Optional[s
             or "http://localhost:11434",
             os.getenv("LOCAL_API_KEY") or os.getenv("OLLAMA_API_KEY"),
         )
+    if provider == "azure" or provider == "azure-openai":
+        return (
+            os.getenv("AZURE_API_BASE") or AZURE_API_BASE,
+            os.getenv("AZURE_API_KEY") or AZURE_API_KEY,
+        )
+    if provider == "azure-anthropic":
+        return (
+            os.getenv("AZURE_ANTHROPIC_URL") or AZURE_ANTHROPIC_URL,
+            os.getenv("AZURE_ANTHROPIC_API_KEY") or AZURE_ANTHROPIC_API_KEY,
+        )
     return (None, None)
 
 
@@ -343,6 +459,10 @@ def _infer_litellm_path(provider: str, model_name: str) -> str:
         return "/v1/messages"
     if provider == "bedrock":
         return f"/model/{model_name}/converse (AWS Bedrock runtime)"
+    if provider == "azure-openai":
+        return "/openai/deployments/{model_name}/chat/completions (Azure OpenAI)"
+    if provider == "azure-anthropic":
+        return "/v1/messages (Azure Anthropic)"
     return "provider-specific (resolved by LiteLLM)"
 
 
@@ -474,6 +594,35 @@ def create_litellm_model(model_name: str, num_retries: int = 2, timeout: int = 3
         print(kwargs)
         return LiteLlm(**kwargs)
     elif provider == "anthropic":
+        _log_litellm_target(provider, model_name, effective_api_base)
+        kwargs = {
+            "model": model_name,
+            "num_retries": num_retries,
+            "timeout": timeout,
+            "custom_llm_provider": "anthropic",
+        }
+        if effective_api_base:
+            kwargs["api_base"] = effective_api_base
+        if effective_api_key:
+            kwargs["api_key"] = effective_api_key
+        print(kwargs)
+        return LiteLlm(**kwargs)
+    elif provider == "azure-openai":
+        _log_litellm_target(provider, model_name, effective_api_base)
+        kwargs = {
+            "model": model_name,
+            "num_retries": num_retries,
+            "timeout": timeout,
+            "custom_llm_provider": "azure",
+            "api_version": os.getenv("AZURE_API_VERSION", AZURE_API_VERSION),
+        }
+        if effective_api_base:
+            kwargs["api_base"] = effective_api_base
+        if effective_api_key:
+            kwargs["api_key"] = effective_api_key
+        print(kwargs)
+        return LiteLlm(**kwargs)
+    elif provider == "azure-anthropic":
         _log_litellm_target(provider, model_name, effective_api_base)
         kwargs = {
             "model": model_name,

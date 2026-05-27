@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -34,6 +35,7 @@ from agentic_data_scientist.core.events import (
     UsageEvent,
     event_to_dict,
 )
+from agentic_data_scientist.core.checkpoint import ReadmeCheckpointStore
 
 
 # Load environment variables
@@ -105,10 +107,11 @@ class DataScientist:
         working_dir: Optional[str] = None,
         auto_cleanup: Optional[bool] = None,
         model_config: Optional[dict] = None,
+        ask_fn=None,
     ):
         """Initialize Agentic Data Scientist core with configuration."""
         self.model_config = model_config
-        print("MCMCM", self.model_config)
+        self.ask_fn = ask_fn  # Optional async callable for human-in-the-loop questions
         # Generate session ID
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         unique_id = uuid.uuid4().hex[:8]
@@ -136,6 +139,28 @@ class DataScientist:
             auto_cleanup=self.auto_cleanup,
         )
 
+        max_events_to_keep = self._read_int_env(
+            "CHECKPOINT_MAX_EVENTS",
+            default=200,
+            minimum=1,
+        )
+        max_summaries_to_keep = self._read_int_env(
+            "CHECKPOINT_MAX_SUMMARIES",
+            default=3,
+            minimum=1,
+        )
+        self.checkpoint_store = ReadmeCheckpointStore(
+            readme_path=self.working_dir / "README.md",
+            session_id=self.session_id,
+            max_events_to_keep=max_events_to_keep,
+            max_summaries_to_keep=max_summaries_to_keep,
+        )
+        self._checkpoint_event_interval = self._read_int_env(
+            "CHECKPOINT_EVENT_INTERVAL",
+            default=10,
+            minimum=1,
+        )
+
         # ADK components
         self.agent = None
         self.app = None  # Will store App instance for ADK agents
@@ -145,6 +170,124 @@ class DataScientist:
         logger.info(f"Initialized Agentic Data Scientist session: {self.session_id}")
         logger.info(f"Working directory: {self.working_dir}")
         logger.info(f"Auto-cleanup enabled: {self.auto_cleanup}")
+
+    def _read_int_env(self, env_name: str, default: int, minimum: int) -> int:
+        """Read an integer environment variable with safe fallback and bounds."""
+        raw = (os.getenv(env_name) or "").strip()
+        if not raw:
+            return default
+
+        try:
+            value = int(raw)
+        except ValueError:
+            logger.warning("Invalid %s=%r. Using default %s.", env_name, raw, default)
+            return default
+
+        if value < minimum:
+            logger.warning("%s=%s is below minimum %s. Clamping.", env_name, value, minimum)
+            return minimum
+
+        return value
+
+    def _checkpoint_event(self, event_type: str, message: str, data: Optional[Dict[str, Any]] = None) -> None:
+        """Write a checkpoint event without interrupting execution on failure."""
+        try:
+            self.checkpoint_store.record_event(
+                event_type=event_type,
+                message=message,
+                data=data,
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to write checkpoint event '{event_type}': {exc}")
+
+    def _checkpoint_summary(
+        self,
+        summary: str,
+        state_digest: Optional[Dict[str, Any]] = None,
+        findings: Optional[List[str]] = None,
+        files: Optional[List[Dict[str, str]]] = None,
+    ) -> None:
+        """Write a checkpoint summary with optional findings and file list.
+        
+        Args:
+            summary: Text summary of progress
+            state_digest: Additional state metadata
+            findings: List of important findings discovered
+            files: List of dicts with 'path' and 'purpose' keys
+        """
+        try:
+            self.checkpoint_store.write_summary(
+                summary=summary,
+                state_digest=state_digest,
+                findings=findings,
+                files=files,
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to write checkpoint summary: {exc}")
+
+    def write_plan_md(self, project_plan: str, status: str = "in_progress") -> None:
+        """Write project plan and current status to Plan.md.
+        
+        Args:
+            project_plan: The project plan/research question
+            status: Current status (in_progress, completed, failed, etc.)
+        """
+        try:
+            self.checkpoint_store.write_plan_md(project_plan, status)
+        except Exception as exc:
+            logger.warning(f"Failed to write Plan.md: {exc}")
+
+    def _extract_findings_from_response(self, response_text: str) -> List[str]:
+        """Extract key findings from response text.
+        
+        Looks for patterns like:
+        - Lines starting with "finding:" or "- Finding:"
+        - Summary sections
+        """
+        findings = []
+        if not response_text:
+            return findings
+        
+        lines = response_text.split('\n')
+        for line in lines:
+            line_lower = line.lower()
+            if 'finding:' in line_lower or (line.strip().startswith('- finding') and ':' in line):
+                text = line.split(':', 1)[-1].strip()
+                if text and len(text) > 10:
+                    findings.append(text[:200])  # Limit to 200 chars per finding
+        
+        return findings[:5]  # Return top 5 findings
+
+    def _classify_file_purpose(self, file_path: str) -> str:
+        """Infer the purpose of a generated file from its name and extension."""
+        path_lower = file_path.lower()
+        
+        if 'figure' in path_lower or path_lower.endswith(('.png', '.jpg', '.svg', '.pdf')):
+            return 'Visualization/figure'
+        elif 'report' in path_lower or 'summary' in path_lower or path_lower.endswith('.md'):
+            return 'Report/summary'
+        elif 'data' in path_lower or path_lower.endswith(('.csv', '.json', '.xlsx')):
+            return 'Data/output file'
+        elif 'code' in path_lower or path_lower.endswith(('.py', '.R', '.js')):
+            return 'Code/script'
+        elif 'model' in path_lower or path_lower.endswith(('.pkl', '.pth', '.h5')):
+            return 'Model/checkpoint'
+        else:
+            return 'Generated file'
+
+    def _build_files_context(self, files_created: List[str]) -> List[Dict[str, str]]:
+        """Build files context with paths and purposes for checkpoint."""
+        files_context = []
+        for file_path in files_created[:20]:  # Limit to 20 most important files
+            files_context.append({
+                'path': file_path,
+                'purpose': self._classify_file_purpose(file_path),
+            })
+        return files_context
+
+    def load_checkpoint_state(self) -> Dict[str, Any]:
+        """Load the latest checkpoint summary and subsequent events."""
+        return self.checkpoint_store.load_resume_state()
 
     def _resolve_usage_model_name(self, author: Optional[str]) -> str:
         """Resolve the most likely model name for a streamed usage event."""
@@ -180,6 +323,7 @@ class DataScientist:
                 working_dir=str(self.working_dir),
                 mcp_servers=self.config.mcp_servers,
                 model_config=self.model_config,
+                ask_fn=self.ask_fn,
             )
 
             # Store both app and agent references
@@ -370,6 +514,26 @@ class DataScientist:
             Result if stream=False, or AsyncGenerator if stream=True
         """
         start_time = datetime.now()
+        previous_checkpoint_state = self.load_checkpoint_state()
+        previous_summary = previous_checkpoint_state.get("latest_summary")
+        if previous_summary:
+            self._checkpoint_event(
+                event_type="resume_context_loaded",
+                message="Loaded previous checkpoint summary from README.md",
+                data={
+                    "previous_summary": previous_summary.get("summary"),
+                    "previous_timestamp": previous_summary.get("timestamp"),
+                    "pending_events": len(previous_checkpoint_state.get("events_after_summary", [])),
+                },
+            )
+        self._checkpoint_summary(
+            summary="Run started",
+            state_digest={
+                "agent_type": self.config.agent_type,
+                "session_id": self.session_id,
+                "message_preview": message[:250],
+            },
+        )
 
         try:
             # Set up agent if not already done
@@ -394,6 +558,12 @@ class DataScientist:
 
             # Save files if provided
             file_info = self.save_files(files) if files else None
+            if file_info:
+                self._checkpoint_event(
+                    event_type="files_saved",
+                    message=f"Saved {len(file_info)} input files",
+                    data={"files": [info.name for info in file_info]},
+                )
 
             # Prepare prompt
             full_prompt = self.prepare_prompt(message, file_info)
@@ -405,6 +575,15 @@ class DataScientist:
 
         except Exception as e:
             logger.error(f"Error in run_async: {e}", exc_info=True)
+            self._checkpoint_event("run_error", f"run_async failed: {e}")
+            self._checkpoint_summary(
+                summary="Run failed",
+                state_digest={
+                    "status": "error",
+                    "error": str(e),
+                    "session_id": self.session_id,
+                },
+            )
             if not stream:
                 return Result(
                     session_id=self.session_id,
@@ -439,6 +618,12 @@ class DataScientist:
                 state_delta=initial_state,
             ):
                 event_count += 1
+                if event_count % self._checkpoint_event_interval == 0:
+                    self._checkpoint_event(
+                        event_type="stream_progress",
+                        message=f"Processed {event_count} ADK events",
+                        data={"event_count": event_count},
+                    )
 
                 # Process event content
                 if hasattr(event, 'author') and hasattr(event, 'content'):
@@ -483,19 +668,36 @@ class DataScientist:
                                         event_number=message_event_number,
                                     )
                                     yield event_to_dict(func_call_event)
+                                    self._checkpoint_event(
+                                        event_type="function_call",
+                                        message=f"Tool call: {fc.name}",
+                                        data={"author": event.author, "arguments": args},
+                                    )
 
                             # Handle function responses
                             if hasattr(part, 'function_response') and part.function_response:
                                 fr = part.function_response
+                                response_payload = fr.response
+                                if not isinstance(response_payload, (dict, list, str, int, float, bool, type(None))):
+                                    response_payload = str(response_payload)
                                 message_event_number += 1
                                 func_resp_event = FunctionResponseEvent(
                                     name=fr.name,
-                                    response=fr.response,
+                                    response=response_payload,
                                     author=event.author,
                                     timestamp=datetime.now().strftime("%H:%M:%S.%f")[:-3],
                                     event_number=message_event_number,
                                 )
                                 yield event_to_dict(func_resp_event)
+                                self._checkpoint_event(
+                                    event_type="function_response",
+                                    message=f"Tool response: {fr.name}",
+                                    data={
+                                        "author": event.author,
+                                        "name": fr.name,
+                                        "response": response_payload,
+                                    },
+                                )
 
                 # Handle usage metadata
                 if hasattr(event, 'usage_metadata') and event.usage_metadata:
@@ -565,10 +767,26 @@ class DataScientist:
                 files_count=len(files_created),
                 timestamp=datetime.now().strftime("%H:%M:%S.%f")[:-3],
             )
+            self._checkpoint_summary(
+                summary="Run completed",
+                state_digest={
+                    "status": "completed",
+                    "duration": duration,
+                    "total_events": message_event_number,
+                    "files_count": len(files_created),
+                },
+                files=self._build_files_context(files_created),
+            )
             yield event_to_dict(completed_event)
 
         except Exception as e:
             logger.error(f"Error in stream: {e}", exc_info=True)
+            self._checkpoint_event("stream_error", f"Stream failed: {e}")
+            self._checkpoint_summary(
+                summary="Run failed during streaming",
+                state_digest={"status": "error", "error": str(e)},
+                files=self._build_files_context(files_created) if 'files_created' in locals() else [],
+            )
             error_event = ErrorEvent(content=str(e), timestamp=datetime.now().strftime("%H:%M:%S.%f")[:-3])
             yield event_to_dict(error_event)
 
@@ -595,6 +813,12 @@ class DataScientist:
                 state_delta=initial_state,
             ):
                 event_count += 1
+                if event_count % self._checkpoint_event_interval == 0:
+                    self._checkpoint_event(
+                        event_type="run_progress",
+                        message=f"Processed {event_count} events",
+                        data={"event_count": event_count},
+                    )
 
                 # Collect text outputs
                 if hasattr(event, 'content') and event.content:
@@ -619,6 +843,16 @@ class DataScientist:
                             relative_path = file_path.relative_to(self.working_dir)
                             files_created.append(str(relative_path))
 
+            self._checkpoint_summary(
+                summary="Run completed",
+                state_digest={
+                    "status": "completed",
+                    "duration": duration,
+                    "total_events": event_count,
+                    "files_count": len(files_created),
+                },
+                files=self._build_files_context(files_created),
+            )
             return Result(
                 session_id=self.session_id,
                 status="completed",
@@ -626,10 +860,16 @@ class DataScientist:
                 files_created=files_created,
                 duration=duration,
                 events_count=event_count,
+                files=self._build_files_context(files_created) if 'files_created' in locals() else [],
             )
 
         except Exception as e:
             logger.error(f"Error collecting responses: {e}", exc_info=True)
+            self._checkpoint_event("collect_error", f"Collect failed: {e}")
+            self._checkpoint_summary(
+                summary="Run failed during response collection",
+                state_digest={"status": "error", "error": str(e)},
+            )
             return Result(
                 session_id=self.session_id,
                 status="error",

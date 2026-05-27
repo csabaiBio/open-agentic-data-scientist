@@ -33,6 +33,7 @@ from .models import (
     ProjectCreate,
     ProjectMode,
     ProjectStatus,
+    AnswerQuestionRequest,
 )
 from .project_manager import PROJECTS_DIR, ProjectManager
 
@@ -198,6 +199,7 @@ async def get_project(project_id: str):
 async def create_project(
     query: str = Form(...),
     mode: str = Form("orchestrated"),
+    human_in_the_loop: str = Form("false"),
     num_papers: int = Form(10),
     days_back: int = Form(30),
     max_cost_usd: float = Form(0.0),
@@ -267,6 +269,7 @@ async def create_project(
         )
     req = ProjectCreate(
         query=query, mode=project_mode,
+        human_in_the_loop=(str(human_in_the_loop).strip().lower() in ("1", "true", "yes", "on")),
         num_papers=max(1, min(20, num_papers)),
         days_back=max(1, min(180, days_back)),
         max_cost_usd=max_cost_usd if max_cost_usd > 0 else None,
@@ -314,6 +317,25 @@ async def resume_project(project_id: str):
     if not ok:
         raise HTTPException(400, f"Project cannot be resumed (status={project.status.value})")
     return {"status": "running"}
+
+
+@app.post("/api/projects/{project_id}/answer")
+async def answer_question(project_id: str, req: AnswerQuestionRequest):
+    """Submit a human answer to a pending agent question."""
+    if not manager.get_project(project_id):
+        raise HTTPException(404, "Project not found")
+    ok = manager.answer_question(project_id, req.question_id, req.answer)
+    if not ok:
+        raise HTTPException(404, "Question not found or already answered")
+    return {"status": "answered"}
+
+
+@app.get("/api/projects/{project_id}/pending-questions")
+async def get_pending_questions(project_id: str):
+    """Return list of question IDs awaiting a human answer."""
+    if not manager.get_project(project_id):
+        raise HTTPException(404, "Project not found")
+    return {"questions": manager.get_pending_questions(project_id)}
 
 
 @app.patch("/api/projects/{project_id}/cost-limit")

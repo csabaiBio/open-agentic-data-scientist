@@ -406,6 +406,7 @@ def create_agent(
     working_dir: Optional[str] = None,
     mcp_servers: Optional[List[str]] = None,
     model_config: Optional[dict] = None,
+    ask_fn=None,
 ) -> LoopDetectionAgent:
     """
     Factory function to create an Agentic Data Scientist ADK agent.
@@ -418,6 +419,10 @@ def create_agent(
         List of MCP servers to enable for tools
     model_config : dict, optional
         Model configuration dict with keys: provider, planning_model, coding_model, api_base, api_key
+    ask_fn : callable, optional
+        Async function(question_id, question) -> answer. When provided and
+        HUMAN_IN_THE_LOOP env var is enabled, the ask_user tool is added so
+        the agent can pause and ask clarifying questions.
 
     Returns
     -------
@@ -487,6 +492,29 @@ def create_agent(
     if not is_network_disabled():
         tools.append(fetch_url)
 
+    # Inject ask_user tool when HUMAN_IN_THE_LOOP is enabled and a callback is provided
+    from agentic_data_scientist.tools.ask_user import (
+        is_human_in_the_loop_enabled,
+        make_ask_user_tool,
+        make_ask_user_questions_tool,
+    )
+    if is_human_in_the_loop_enabled() and ask_fn is not None:
+        tools.append(make_ask_user_tool(ask_fn))
+        tools.append(make_ask_user_questions_tool(ask_fn))
+        logger.info("[AgenticDS] ask_user / AskUserQuestion tools enabled (HUMAN_IN_THE_LOOP=true)")
+
+    human_loop_instruction_suffix = ""
+    if is_human_in_the_loop_enabled() and ask_fn is not None:
+        human_loop_instruction_suffix = (
+            "\n\nHUMAN-IN-THE-LOOP MODE:\n"
+            "- If the task is ambiguous or missing critical context, use the AskUserQuestion tool.\n"
+            "- Pass a list of question objects, each with 'question', an optional 'header', "
+            "optional 'options' (list of {label, description}), and optional 'multiSelect'.\n"
+            "- You may also call the simpler ask_user tool for a single free-text question.\n"
+            "- After asking, wait for the user's answer before proceeding.\n"
+            "- Prefer asking all related questions in one AskUserQuestion call.\n"
+        )
+
     logger.info(f"[AgenticDS] Configured {len(tools)} local tools")
 
     planning_provider_for_config = resolve_provider_for_role(model_config, role="planning")
@@ -519,7 +547,7 @@ def create_agent(
     # ------------------------- Summary Agent -------------------------
 
     logger.info("[AgenticDS] Loading summary_agent prompt")
-    summary_agent_instructions = load_prompt("summary")
+    summary_agent_instructions = load_prompt("summary") + human_loop_instruction_suffix
 
     logger.info(f"[AgenticDS] Creating summary_agent with model={planning_model}")
 
@@ -541,7 +569,7 @@ def create_agent(
     # ------------------------- High Level Planning Agents -------------------------
 
     logger.info("[AgenticDS] Loading plan maker agent prompt")
-    plan_maker_instructions = load_prompt("plan_maker")
+    plan_maker_instructions = load_prompt("plan_maker") + human_loop_instruction_suffix
 
     logger.info(f"[AgenticDS] Creating plan maker agent with model={planning_model}")
 
@@ -565,7 +593,7 @@ def create_agent(
     )
 
     logger.info("[AgenticDS] Loading plan reviewer agent prompt")
-    plan_reviewer_instructions = load_prompt("plan_reviewer")
+    plan_reviewer_instructions = load_prompt("plan_reviewer") + human_loop_instruction_suffix
 
     logger.info(f"[AgenticDS] Creating plan reviewer agent with model={review_model}")
 
@@ -607,7 +635,7 @@ def create_agent(
     # ------------------------- High Level Plan Parser -------------------------
 
     logger.info("[AgenticDS] Loading plan parser prompt")
-    plan_parser_instructions = load_prompt("plan_parser")
+    plan_parser_instructions = load_prompt("plan_parser") + human_loop_instruction_suffix
 
     logger.info(f"[AgenticDS] Creating plan parser agent with model={planning_model}")
 
@@ -626,7 +654,7 @@ def create_agent(
     # ------------------------- Success Criteria Checker -------------------------
 
     logger.info("[AgenticDS] Loading criteria checker prompt")
-    criteria_checker_instructions = load_prompt("criteria_checker")
+    criteria_checker_instructions = load_prompt("criteria_checker") + human_loop_instruction_suffix
 
     logger.info(f"[AgenticDS] Creating criteria checker agent with model={review_model}")
 
@@ -654,7 +682,7 @@ def create_agent(
     # ------------------------- Stage Reflector -------------------------
 
     logger.info("[AgenticDS] Loading stage reflector prompt")
-    stage_reflector_instructions = load_prompt("stage_reflector")
+    stage_reflector_instructions = load_prompt("stage_reflector") + human_loop_instruction_suffix
 
     logger.info(f"[AgenticDS] Creating stage reflector agent with model={planning_model}")
 
@@ -717,6 +745,7 @@ def create_app(
     working_dir: Optional[str] = None,
     mcp_servers: Optional[List[str]] = None,
     model_config: Optional[dict] = None,
+    ask_fn=None,
 ) -> App:
     """
     Create an App instance with context management for the ADK agent.
@@ -736,7 +765,7 @@ def create_app(
         The configured App with context caching and compression
     """
     # Create the root agent
-    root_agent = create_agent(working_dir=working_dir, mcp_servers=mcp_servers, model_config=model_config)
+    root_agent = create_agent(working_dir=working_dir, mcp_servers=mcp_servers, model_config=model_config, ask_fn=ask_fn)
 
     # Configure context caching (just creating the config enables caching)
     cache_config = ContextCacheConfig()

@@ -30,6 +30,7 @@ dependencies = [
     "fpdf2>=2.8.7",
     "markdown>=3.10.2",
     "pillow>=12.1.1",
+    "langsmith[google-adk]>=0.8.5",
 ]
 
 [project.urls]

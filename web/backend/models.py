@@ -87,6 +87,7 @@ class ModelConfig(BaseModel):
 class ProjectCreate(BaseModel):
     query: str
     mode: ProjectMode = ProjectMode.ORCHESTRATED
+    human_in_the_loop: bool = False
     files: List[str] = Field(default_factory=list)
     num_papers: int = 10
     days_back: int = 30
@@ -102,6 +103,7 @@ class Project(BaseModel):
     id: str
     query: str
     mode: ProjectMode
+    human_in_the_loop: bool = False
     status: ProjectStatus = ProjectStatus.PENDING
     created_at: str = ""
     started_at: Optional[str] = None
@@ -174,10 +176,25 @@ class CostLimitUpdateRequest(BaseModel):
     max_cost_usd: Optional[float] = None
 
 
+class PendingQuestion(BaseModel):
+    """A question waiting for human input."""
+    question_id: str
+    question: str
+    asked_at: str = ""
+
+
+class AnswerQuestionRequest(BaseModel):
+    """User's answer to a pending question."""
+    question_id: str
+    answer: str
+
+
 class LlmModelType(str, Enum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     LOCAL = "local"
+    AZURE_OPENAI = "azure-openai"
+    AZURE_ANTHROPIC = "azure-anthropic"
 
 
 class LlmModelCreate(BaseModel):

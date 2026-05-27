@@ -28,6 +28,7 @@ export async function fetchProject(id: string): Promise<Project> {
 export interface CreateProjectOpts {
   query: string
   mode: string
+  humanInTheLoop?: boolean
   files: File[]
   numPapers?: number
   daysBack?: number
@@ -42,6 +43,7 @@ export async function createProject(opts: CreateProjectOpts): Promise<Project> {
   const form = new FormData()
   form.append('query', opts.query)
   form.append('mode', opts.mode)
+  form.append('human_in_the_loop', opts.humanInTheLoop ? 'true' : 'false')
   form.append('num_papers', String(opts.numPapers ?? 10))
   form.append('days_back', String(opts.daysBack ?? 30))
   if (typeof opts.maxCostUsd === 'number' && opts.maxCostUsd > 0) {
@@ -92,8 +94,17 @@ export async function stopProject(id: string): Promise<void> {
 }
 
 export async function resumeProject(id: string): Promise<void> {
-  const res = await fetch(`${BASE}/projects/${id}/resume`, { method: 'POST' })
+  const res = await fetch(BASE + '/projects/' + id + '/resume', { method: 'POST' })
   if (!res.ok) throw new Error('Failed to resume project')
+}
+
+export async function answerQuestion(id: string, questionId: string, answer: string): Promise<void> {
+  const res = await fetch(BASE + '/projects/' + id + '/answer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question_id: questionId, answer }),
+  })
+  if (!res.ok) throw new Error('Failed to answer question')
 }
 
 export async function updateProjectCostLimit(id: string, maxCostUsd?: number): Promise<{ status: string; max_cost_usd: number | null; total_cost_usd: number }> {

@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm'
 import {
   Brain, MessageSquare, Terminal, AlertTriangle, Info,
   Wrench, ChevronDown, ChevronRight, Compass, Cpu, FlaskConical,
-  Eye, Pencil, Search as SearchIcon, Lightbulb, Coins, Clock
+  Eye, Pencil, Search as SearchIcon, Lightbulb, Coins, Clock, BookMarked
 } from 'lucide-react'
 import type { ProjectEvent, Stage } from '../types'
 
@@ -553,6 +553,49 @@ function EventCard({ event, stages, previousUsageTimestamp, previousEventTimesta
 
   // Status messages
   if (event.type === 'status') {
+    const isResume = event.metadata?.phase === 'resume'
+    const checkpointFound = event.metadata?.checkpoint_summary_found === true
+    const summaryText = event.metadata?.checkpoint_summary as string | undefined
+    const pendingEvents = event.metadata?.checkpoint_events_after_summary as number | undefined
+
+    if (isResume && checkpointFound && summaryText) {
+      return (
+        <div className="flex flex-col gap-1.5 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <BookMarked className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+            <span className="text-xs font-bold text-amber-700 uppercase tracking-wider flex-1">Checkpoint Loaded</span>
+            {typeof pendingEvents === 'number' && (
+              <span className="text-xs bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded-full font-medium">
+                +{pendingEvents} event{pendingEvents !== 1 ? 's' : ''} since last summary
+              </span>
+            )}
+            {previousStepDelta}
+          </div>
+          <p className="text-xs text-amber-800 leading-snug pl-5 line-clamp-3">{summaryText}</p>
+                {Array.isArray(event.metadata?.checkpoint_findings) && event.metadata.checkpoint_findings.length > 0 && (
+                  <div className="mt-2 pl-5 border-l-2 border-amber-300">
+                    <p className="text-xs font-semibold text-amber-900 mb-1">Key findings:</p>
+                    <ul className="text-xs text-amber-800 space-y-0.5">
+                      {event.metadata.checkpoint_findings.slice(0, 3).map((finding: string, idx: number) => (
+                        <li key={idx}>• {finding.slice(0, 100)}...</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {Array.isArray(event.metadata?.checkpoint_files) && event.metadata.checkpoint_files.length > 0 && (
+                  <div className="mt-2 pl-5 border-l-2 border-amber-300">
+                    <p className="text-xs font-semibold text-amber-900 mb-1">Files generated:</p>
+                    <ul className="text-xs text-amber-800 space-y-0.5">
+                      {event.metadata.checkpoint_files.slice(0, 3).map((file: any, idx: number) => (
+                        <li key={idx}>📄 <code className="text-amber-700">{file.path}</code> {file.purpose && `(${file.purpose})`}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+        </div>
+      )
+    }
+
     return (
       <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50/60 animate-fade-in">
         <Info className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
@@ -634,12 +677,6 @@ function EventCard({ event, stages, previousUsageTimestamp, previousEventTimesta
 /* ── Main component ───────────────────────────────────────────── */
 
 export default function EventLog({ events, stages = [] }: { events: ProjectEvent[]; stages?: Stage[] }) {
-  const bottomRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [events.length])
-
   // Filter tool_results (they are verbose and not useful to the user)
   const filtered = events.filter(e => e.type !== 'tool_result')
   const previousUsageTimestampById = new Map<number, string>()
@@ -680,7 +717,6 @@ export default function EventLog({ events, stages = [] }: { events: ProjectEvent
           previousEventTimestamp={previousEventTimestampById.get(event.id)}
         />
       ))}
-      <div ref={bottomRef} />
     </div>
   )
 }

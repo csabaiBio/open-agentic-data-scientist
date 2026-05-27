@@ -16,6 +16,7 @@ export interface ProjectEvent {
   id: number
   type: 'message' | 'thought' | 'tool_call' | 'tool_result' | 'status' | 'error' | 'done' | 'usage'
     | 'discovery_phase' | 'discovery_paper' | 'discovery_synthesis' | 'discovery_hypothesis' | 'discovery_research_question'
+    | 'user_question' | 'user_answer'
   content: string
   author: string
   timestamp: string
@@ -74,6 +75,7 @@ export interface Project {
   id: string
   query: string
   mode: ProjectMode
+  human_in_the_loop: boolean
   status: ProjectStatus
   created_at: string
   started_at: string | null
@@ -111,6 +113,7 @@ export interface ProjectSummary {
   id: string
   query: string
   mode: ProjectMode
+  human_in_the_loop?: boolean
   status: ProjectStatus
   created_at: string
   duration: number | null
@@ -124,7 +127,7 @@ export interface ProjectSummary {
   llm_config: ModelConfig | null
 }
 
-export type LlmModelType = 'openai' | 'anthropic' | 'local'
+export type LlmModelType = 'openai' | 'anthropic' | 'local' | 'azure' | 'azure-anthropic'
 
 export interface LlmModel {
   id: number

@@ -3,11 +3,11 @@ import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, StopCircle, FileText, Image, ScrollText, Loader2,
   Clock, BookOpen, Download, RefreshCw, BarChart3, Compass, Cpu, FlaskConical, Zap, GitBranch, Coins,
-  Activity, Terminal, Globe, Bot, AlertTriangle
+  Activity, Terminal, Globe, Bot, AlertTriangle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { fetchProject, stopProject, resumeProject, updateProjectCostLimit, generatePaper, getPaperPdfUrl, confirmDiscovery, subscribeToEvents } from '../api'
+import { fetchProject, stopProject, resumeProject, updateProjectCostLimit, generatePaper, getPaperPdfUrl, confirmDiscovery, subscribeToEvents, answerQuestion } from '../api'
 import type { Project, ProjectEvent, Stage } from '../types'
 import StatusBadge from '../components/StatusBadge'
 import StageProgress from '../components/StageProgress'
@@ -166,17 +166,19 @@ function LiveActivityCard({
   stages,
   isRunning,
   nowMs,
+  projectStartedAt,
 }: {
   events: ProjectEvent[]
   stages: Stage[]
   isRunning: boolean
   nowMs: number
+  projectStartedAt: string | null
 }) {
   const runningStage = stages.find(stage => stage.status === 'running')
   const pendingStage = stages.find(stage => stage.status === 'pending')
   const activity = extractActivitySummary(events, runningStage)
   const stageDurationText = getStageDurationLabel(runningStage, nowMs)
-  const lastUpdateText = formatRelativeTime(activity.timestamp, nowMs)
+  // const lastUpdateText = formatRelativeTime(activity.timestamp, nowMs)
   const lastUpdateMs = activity.timestamp ? new Date(activity.timestamp).getTime() : NaN
   const secondsSinceUpdate = Number.isFinite(lastUpdateMs) ? Math.max(0, Math.round((nowMs - lastUpdateMs) / 1000)) : null
   const isStale = isRunning && secondsSinceUpdate !== null && secondsSinceUpdate >= 30
@@ -199,7 +201,8 @@ function LiveActivityCard({
   const toneClassName = toneClasses[isStale ? 'warning' : activity.tone]
 
   return (
-    <div className="glass-card p-5 lg:col-span-3">
+    <div className="glass-card p-5">
+      
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
@@ -220,10 +223,10 @@ function LiveActivityCard({
                 ? `Next: Stage ${pendingStage.index + 1}: ${pendingStage.title}`
                 : 'No active stage'}
             </span>
-            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-gray-500">
+            {/* <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-gray-500">
               <Clock className="w-3.5 h-3.5" />
               Last update {lastUpdateText}
-            </span>
+            </span> */}
             {stageDurationText && (
               <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-gray-500">
                 <Clock className="w-3.5 h-3.5" />
@@ -236,6 +239,21 @@ function LiveActivityCard({
               ? 'The workflow has not emitted a new event recently. It may still be inside a long-running script, network request, or model call.'
               : activity.detail}
           </p>
+
+          {pendingStage && (
+            <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+              <span className="font-medium text-gray-700">Next stage:</span>{' '}
+              Stage {pendingStage.index + 1}: {pendingStage.title}
+            </div>
+          )}
+
+          <div className="mt-4">
+            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-700">
+              <BarChart3 className="w-4 h-4 text-brand-500" />
+              Stages
+            </div>
+            <StageProgress stages={stages} projectStartedAt={projectStartedAt} isRunning={isRunning} />
+          </div>
         </div>
         <div className="hidden sm:flex h-11 w-11 items-center justify-center rounded-2xl bg-gray-100 text-gray-500">
           {activity.tone === 'network' ? <Globe className="w-5 h-5" /> : activity.tone === 'active' ? <Terminal className="w-5 h-5" /> : <Bot className="w-5 h-5" />}
@@ -260,6 +278,11 @@ export default function ProjectDetail() {
   const [paperContent, setPaperContent] = useState<string | null>(null)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [nowMs, setNowMs] = useState(Date.now())
+  const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(false)
+  const [isModelConfigCollapsed, setIsModelConfigCollapsed] = useState(true)
+  const [pendingQuestion, setPendingQuestion] = useState<{ questionId: string; question: string } | null>(null)
+  const [answerInput, setAnswerInput] = useState('')
+  const [answering, setAnswering] = useState(false)
 
   // Load project data
   const loadProject = useCallback(async () => {
@@ -330,6 +353,20 @@ export default function ProjectDetail() {
         if (event.type === 'status' && event.metadata?.phase === 'analysis_start') {
           setTab('progress')
         }
+
+        if (event.type === 'user_question') {
+          const questionId = String(event.metadata?.question_id || '')
+          if (questionId) {
+            setPendingQuestion({ questionId, question: event.content || 'Please provide clarification.' })
+            setTab('progress')
+          }
+        }
+
+        if (event.type === 'user_answer') {
+          const answeredId = String(event.metadata?.question_id || '')
+          setPendingQuestion(prev => (prev && prev.questionId === answeredId ? null : prev))
+          setAnswerInput('')
+        }
       },
       (status) => {
         // Reload full project data when stream ends (completed, failed, stopped, awaiting_confirmation)
@@ -382,6 +419,23 @@ export default function ProjectDetail() {
     const interval = setInterval(() => setNowMs(Date.now()), 1000)
     return () => clearInterval(interval)
   }, [project?.status])
+
+  const handleSubmitAnswer = async () => {
+    if (!id || !pendingQuestion) return
+    const trimmed = answerInput.trim()
+    if (!trimmed) return
+    setAnswering(true)
+    try {
+      await answerQuestion(id, pendingQuestion.questionId, trimmed)
+      setPendingQuestion(null)
+      setAnswerInput('')
+    } catch (e) {
+      console.error('Failed to answer question:', e)
+      alert('Failed to submit answer. Please try again.')
+    } finally {
+      setAnswering(false)
+    }
+  }
 
   const handleStop = async () => {
     if (!id) return
@@ -516,9 +570,13 @@ export default function ProjectDetail() {
   const isCompleted = project.status === 'completed'
   const isResumable = project.status === 'stopped' || project.status === 'failed'
   const isAwaitingConfirmation = project.status === 'awaiting_confirmation'
+  const isPausedForInput = !!pendingQuestion
 
   const isDiscovery = project.mode === 'discovery'
   const discoveryPaperCount = project.discovery?.papers?.length ?? 0
+  const contentGridClass = isRightSidebarCollapsed
+    ? 'grid grid-cols-1 lg:grid-cols-4 gap-6'
+    : 'grid grid-cols-1 lg:grid-cols-5 gap-6'
 
   const tabs: { key: Tab; label: string; icon: typeof ScrollText; count?: number }[] = [
     ...(isDiscovery ? [{ key: 'discovery' as Tab, label: 'Discovery', icon: Compass, count: discoveryPaperCount }] : []),
@@ -535,10 +593,10 @@ export default function ProjectDetail() {
     <div className="space-y-6">
       {/* Back + Header */}
       <div>
-        <Link to="/" className="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 transition-colors mb-4">
+        {/* <Link to="/" className="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 transition-colors mb-4">
           <ArrowLeft className="w-4 h-4" />
           Back to projects
-        </Link>
+        </Link> */}
 
         <div className="glass-card p-6">
           <div className="flex items-start justify-between gap-4">
@@ -556,7 +614,7 @@ export default function ProjectDetail() {
                 )}
               </div>
               <h1 className="text-lg font-semibold text-gray-900 leading-snug">{project.query}</h1>
-              <span className="font-mono text-xs text-gray-400 select-all mt-0.5 block" title="Project ID">ID: {project.id}</span>
+              
               {project.input_files.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {project.input_files.map(f => (
@@ -572,59 +630,7 @@ export default function ProjectDetail() {
             </div>
 
             <div className="flex flex-col items-end gap-3 flex-shrink-0">
-              <div className="min-w-[140px] rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-right">
-                <div className="flex items-center justify-end gap-2 text-emerald-700 mb-1">
-                  <Coins className="w-4 h-4" />
-                  <span className="text-xs font-semibold uppercase tracking-wide">Project Cost</span>
-                </div>
-                <div className="text-xl font-bold text-emerald-900">{formatUsd(project.total_cost_usd)}</div>
-                {typeof project.max_cost_usd === 'number' && project.max_cost_usd > 0 && (
-                  <div className="text-[11px] text-emerald-700 mt-1">
-                    {formatUsd(project.total_cost_usd)} / {formatUsd(project.max_cost_usd)}
-                  </div>
-                )}
-                <div className="text-[11px] text-emerald-700 mt-1">{project.llm_calls} LLM call{project.llm_calls === 1 ? '' : 's'}</div>
-                <div className="mt-2 flex items-center gap-1 justify-end">
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={costLimitInput}
-                    onChange={(e) => setCostLimitInput(e.target.value)}
-                    placeholder="Set limit"
-                    className="w-24 px-2 py-1 text-[11px] rounded-md border border-emerald-200 bg-white text-right text-emerald-900 outline-none"
-                  />
-                  <button
-                    onClick={handleUpdateCostLimit}
-                    disabled={updatingCostLimit}
-                    className="px-2 py-1 text-[11px] rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
-                  >
-                    {updatingCostLimit ? '...' : 'Save'}
-                  </button>
-                </div>
-              </div>
-
               <div className="flex items-center gap-2">
-              {isRunning && (
-                <button
-                  onClick={handleStop}
-                  disabled={stopping}
-                  className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-xl text-sm font-medium hover:bg-red-100 transition-colors disabled:opacity-50"
-                >
-                  {stopping ? <Loader2 className="w-4 h-4 animate-spin" /> : <StopCircle className="w-4 h-4" />}
-                  Stop
-                </button>
-              )}
-              {isResumable && (
-                <button
-                  onClick={handleResume}
-                  disabled={resuming}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 rounded-xl text-sm font-medium hover:bg-green-100 transition-colors disabled:opacity-50"
-                >
-                  {resuming ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                  Resume
-                </button>
-              )}
               {isCompleted && (
                 <button
                   onClick={handleGeneratePaper}
@@ -642,183 +648,22 @@ export default function ProjectDetail() {
               >
                 <RefreshCw className="w-4 h-4" />
               </button>
+              <button
+                onClick={() => setIsRightSidebarCollapsed(prev => !prev)}
+                className="hidden lg:inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                title={isRightSidebarCollapsed ? 'Show right sidebar' : 'Hide right sidebar'}
+              >
+                {isRightSidebarCollapsed ? <ChevronLeft className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                {isRightSidebarCollapsed ? 'Show Sidebar' : 'Hide Sidebar'}
+              </button>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 bg-gray-100/80 p-1 rounded-xl w-fit">
-        {tabs.map(t => {
-          const Icon = t.icon
-          const active = tab === t.key
-          return (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              {t.label}
-              {t.count !== undefined && t.count > 0 && (
-                <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-                  active ? 'bg-brand-100 text-brand-700' : 'bg-gray-200 text-gray-500'
-                }`}>
-                  {t.count}
-                </span>
-              )}
-            </button>
-          )
-        })}
-      </div>
-
-      {/* Tab Content */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {tab === 'discovery' && (
-          <div className="lg:col-span-3">
-            <div className="glass-card p-5">
-              <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
-                <Compass className="w-4 h-4 text-violet-500" />
-                Literature Discovery
-                {project.discovery_phase && project.discovery_phase !== 'done' && (
-                  <span className="w-2 h-2 bg-violet-400 rounded-full animate-pulse" />
-                )}
-              </h3>
-              <DiscoveryPanel
-                discovery={project.discovery}
-                discoveryPhase={project.discovery_phase}
-                events={events}
-                analysisQuery={project.analysis_query}
-                isAwaitingConfirmation={isAwaitingConfirmation}
-                onConfirm={handleConfirmDiscovery}
-              />
-            </div>
-          </div>
-        )}
-
-        {tab === 'progress' && (
-          <>
-            <LiveActivityCard events={events} stages={project.stages} isRunning={isRunning} nowMs={nowMs} />
-            {/* Stages + Skills panel */}
-            <div className="lg:col-span-1 space-y-4">
-              <div className="glass-card p-5">
-                <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                  <BarChart3 className="w-4 h-4 text-brand-500" />
-                  Stages
-                </h3>
-                
-                <StageProgress stages={project.stages} projectStartedAt={project.started_at} isRunning={isRunning} />
-              </div>
-              {project.llm_config && (
-                <div className="glass-card p-5">
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-2">
-                      <Cpu className="w-4 h-4 text-indigo-500" />
-                      Model Config
-                    </span>
-                    <button
-                      onClick={handleDownloadProjectConfig}
-                      title="Download YAML config"
-                      className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                    </button>
-                  </h3>
-                  <div className="space-y-2 text-xs">
-                    {project.mode !== 'simple' && project.llm_config.planning_model && (
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-gray-500">Planning</span>
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          {project.llm_config.planning_provider && (
-                            <span className="font-medium text-gray-700 bg-indigo-50 px-2 py-0.5 rounded whitespace-nowrap">
-                              {project.llm_config.planning_provider === 'local' ? 'Local' : project.llm_config.planning_provider}
-                            </span>
-                          )}
-                          <span className="font-mono text-[10px] text-gray-600 truncate max-w-[140px]" title={project.llm_config.planning_model}>
-                            {project.llm_config.planning_model.split('/').pop()}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                    {project.mode !== 'simple' && project.llm_config.review_model && (
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-gray-500">Review</span>
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          {project.llm_config.review_provider && (
-                            <span className="font-medium text-gray-700 bg-indigo-50 px-2 py-0.5 rounded whitespace-nowrap">
-                              {project.llm_config.review_provider === 'local' ? 'Local' : project.llm_config.review_provider}
-                            </span>
-                          )}
-                          <span className="font-mono text-[10px] text-gray-600 truncate max-w-[140px]" title={project.llm_config.review_model}>
-                            {project.llm_config.review_model.split('/').pop()}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                    {project.mode !== 'discovery' && project.llm_config.coding_model && (
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-gray-500">Coding</span>
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          {project.llm_config.coding_provider && (
-                            <span className="font-medium text-gray-700 bg-indigo-50 px-2 py-0.5 rounded whitespace-nowrap">
-                              {project.llm_config.coding_provider === 'local' ? 'Local' : project.llm_config.coding_provider}
-                            </span>
-                          )}
-                          <span className="font-mono text-[10px] text-gray-600 truncate max-w-[140px]" title={project.llm_config.coding_model}>
-                            {project.llm_config.coding_model.split('/').pop()}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                    {project.llm_config.planning_api_base && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-gray-500">Planning Base</span>
-                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.planning_api_base}</span>
-                      </div>
-                    )}
-                    {project.llm_config.review_api_base && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-gray-500">Review Base</span>
-                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.review_api_base}</span>
-                      </div>
-                    )}
-                    {project.llm_config.coding_api_base && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-gray-500">Coding Base</span>
-                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.coding_api_base}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-              <div className="glass-card p-5">
-                <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                  <Zap className="w-4 h-4 text-amber-500" />
-                  Skills Used
-                  {isRunning && <span className="w-2 h-2 bg-amber-400 rounded-full animate-pulse" />}
-                </h3>
-                <SkillsBadges skills={project.skills_used || []} isRunning={isRunning} />
-              </div>
-            </div>
-            {/* Event log */}
-            <div className="lg:col-span-2">
-              <div className="glass-card p-5">
-                <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                  <ScrollText className="w-4 h-4 text-brand-500" />
-                  Activity Log
-                  {isRunning && <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />}
-                </h3>
-                <EventLog events={events} stages={project.stages} />
-              </div>
-            </div>
-          </>
-        )}
-
-        {tab === 'figures' && (
-          <div className="lg:col-span-3">
+             {tab === 'figures' && (
+          <div className="lg:col-span-3 lg:col-start-2">
             <div className="glass-card p-5">
                   
               <FigureGallery projectId={project.id} files={project.files} />
@@ -827,7 +672,7 @@ export default function ProjectDetail() {
         )}
 
         {tab === 'files' && (
-          <div className="lg:col-span-3">
+          <div className="lg:col-span-3 lg:col-start-2">
             <div className="glass-card p-5">
               <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
                 <FileText className="w-4 h-4 text-brand-500" />
@@ -839,7 +684,7 @@ export default function ProjectDetail() {
         )}
 
         {tab === 'paper' && (
-          <div className="lg:col-span-3">
+          <div className="lg:col-span-3 lg:col-start-2">
             <div className="glass-card p-5">
               <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
                 <BookOpen className="w-4 h-4 text-brand-500" />
@@ -944,7 +789,7 @@ export default function ProjectDetail() {
         )}
 
         {tab === 'in_silico' && (
-          <div className="lg:col-span-3">
+          <div className="lg:col-span-3 lg:col-start-2">
             <div className="glass-card p-5">
               <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
                 <Cpu className="w-4 h-4 text-cyan-500" />
@@ -956,7 +801,7 @@ export default function ProjectDetail() {
         )}
 
         {tab === 'experimental' && (
-          <div className="lg:col-span-3">
+          <div className="lg:col-span-3 lg:col-start-2">
             <div className="glass-card p-5">
               <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
                 <FlaskConical className="w-4 h-4 text-emerald-500" />
@@ -968,7 +813,7 @@ export default function ProjectDetail() {
         )}
 
         {tab === 'graph' && (
-          <div className="lg:col-span-3">
+          <div className="lg:col-span-3 lg:col-start-2">
             <div className="glass-card p-5 relative">
               <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
                 <GitBranch className="w-4 h-4 text-violet-500" />
@@ -976,6 +821,288 @@ export default function ProjectDetail() {
                 {isRunning && <span className="w-2 h-2 bg-violet-400 rounded-full animate-pulse" />}
               </h3>
               <WorkflowGraph events={events} isRunning={isRunning} projectId={project.id} files={project.files} stages={project.stages} />
+            </div>
+          </div>
+        )}
+
+      {/* Tab Content */}
+      <div className={contentGridClass}>
+        {tab === 'discovery' && (
+          <div className="lg:col-span-3 lg:col-start-2">
+            <div className="glass-card p-5">
+              <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                <Compass className="w-4 h-4 text-violet-500" />
+                Literature Discovery
+                {project.discovery_phase && project.discovery_phase !== 'done' && (
+                  <span className="w-2 h-2 bg-violet-400 rounded-full animate-pulse" />
+                )}
+              </h3>
+              <DiscoveryPanel
+                discovery={project.discovery}
+                discoveryPhase={project.discovery_phase}
+                events={events}
+                analysisQuery={project.analysis_query}
+                isAwaitingConfirmation={isAwaitingConfirmation}
+                onConfirm={handleConfirmDiscovery}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* {tab === 'progress' && ( */}
+          <>
+            
+            {/* Stages + Skills panel */}
+            <div className="lg:col-span-1 space-y-4">
+              <span className="font-mono text-xs text-gray-400 select-all mt-0.5 block" title="Project ID">ID: {project.id}</span>
+
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                <div className="flex items-center justify-between gap-2 text-emerald-700 mb-1">
+                  <div className="flex items-center gap-2">
+                    <Coins className="w-4 h-4" />
+                    <span className="text-xs font-semibold uppercase tracking-wide">Project Cost</span>
+                
+                  <div className="text-[11px] text-emerald-700 mt-1">
+                    {formatUsd(project.total_cost_usd)} / <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={costLimitInput}
+                    onChange={(e) => setCostLimitInput(e.target.value)}
+                    placeholder="Set limit"
+                    className="w-14 px-2 py-1 text-[11px] rounded-md border border-emerald-200 bg-white text-right text-emerald-900 outline-none"
+                  />
+                  <button
+                    onClick={handleUpdateCostLimit}
+                    disabled={updatingCostLimit}
+                    className="px-1 py-1 text-[11px] rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    {updatingCostLimit ? '...' : 'Update'}
+                  </button>
+                  </div>
+      </div>
+                </div>
+                
+                <div className="mt-3 flex items-center gap-2">
+                  {isRunning && (
+                    <button
+                      onClick={handleStop}
+                      disabled={stopping}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-medium hover:bg-red-100 transition-colors disabled:opacity-50"
+                    >
+                      {stopping ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <StopCircle className="w-3.5 h-3.5" />}
+                      Stop
+                    </button>
+                  )}
+                  {isResumable && (
+                    <button
+                      onClick={handleResume}
+                      disabled={resuming}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 rounded-lg text-xs font-medium hover:bg-green-100 transition-colors disabled:opacity-50"
+                    >
+                      {resuming ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                      Resume
+                    </button>
+                  )}
+                  <span className="text-[11px] text-emerald-700">{project.llm_calls} call{project.llm_calls === 1 ? '' : 's'}</span>
+
+                </div>
+              </div>
+
+                <LiveActivityCard
+                  events={events}
+                  stages={project.stages}
+                  isRunning={isRunning}
+                  nowMs={nowMs}
+                  projectStartedAt={project.started_at}
+                />
+              {project.llm_config && (
+                <div className="glass-card p-5">
+                  <div className="text-sm font-semibold text-gray-700 flex items-center justify-between gap-2">
+                    <button
+                      onClick={() => setIsModelConfigCollapsed(prev => !prev)}
+                      className="flex items-center gap-2 text-left"
+                    >
+                      <Cpu className="w-4 h-4 text-indigo-500" />
+                      Model Config
+                      {isModelConfigCollapsed ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronUp className="w-4 h-4 text-gray-400" />}
+                    </button>
+                    <button
+                      onClick={handleDownloadProjectConfig}
+                      title="Download YAML config"
+                      className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  {!isModelConfigCollapsed && <div className="space-y-2 text-xs mt-3">
+                    {project.mode !== 'simple' && project.llm_config.planning_model && (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-gray-500">Planning</span>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          {project.llm_config.planning_provider && (
+                            <span className="font-medium text-gray-700 bg-indigo-50 px-2 py-0.5 rounded whitespace-nowrap">
+                              {project.llm_config.planning_provider === 'local' ? 'Local' : project.llm_config.planning_provider}
+                            </span>
+                          )}
+                          <span className="font-mono text-[10px] text-gray-600 truncate max-w-[140px]" title={project.llm_config.planning_model}>
+                            {project.llm_config.planning_model.split('/').pop()}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    {project.mode !== 'simple' && project.llm_config.review_model && (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-gray-500">Review</span>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          {project.llm_config.review_provider && (
+                            <span className="font-medium text-gray-700 bg-indigo-50 px-2 py-0.5 rounded whitespace-nowrap">
+                              {project.llm_config.review_provider === 'local' ? 'Local' : project.llm_config.review_provider}
+                            </span>
+                          )}
+                          <span className="font-mono text-[10px] text-gray-600 truncate max-w-[140px]" title={project.llm_config.review_model}>
+                            {project.llm_config.review_model.split('/').pop()}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    {project.mode !== 'discovery' && project.llm_config.coding_model && (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-gray-500">Coding</span>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          {project.llm_config.coding_provider && (
+                            <span className="font-medium text-gray-700 bg-indigo-50 px-2 py-0.5 rounded whitespace-nowrap">
+                              {project.llm_config.coding_provider === 'local' ? 'Local' : project.llm_config.coding_provider}
+                            </span>
+                          )}
+                          <span className="font-mono text-[10px] text-gray-600 truncate max-w-[140px]" title={project.llm_config.coding_model}>
+                            {project.llm_config.coding_model.split('/').pop()}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    {project.llm_config.planning_api_base && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-500">Planning Base</span>
+                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.planning_api_base}</span>
+                      </div>
+                    )}
+                    {project.llm_config.review_api_base && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-500">Review Base</span>
+                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.review_api_base}</span>
+                      </div>
+                    )}
+                    {project.llm_config.coding_api_base && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-500">Coding Base</span>
+                        <span className="font-mono text-[10px] text-gray-600 truncate max-w-[180px]">{project.llm_config.coding_api_base}</span>
+                      </div>
+                    )}
+                  </div>}
+                </div>
+              )}
+              <div className="glass-card p-5">
+                <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-amber-500" />
+                  Skills Used
+                  {isRunning && <span className="w-2 h-2 bg-amber-400 rounded-full animate-pulse" />}
+                </h3>
+                <SkillsBadges skills={project.skills_used || []} isRunning={isRunning} />
+              </div>
+            </div>
+            {/* Event log */}
+            <div className="lg:col-span-3">
+              <div className="glass-card p-5">
+                <h3 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                  <ScrollText className="w-4 h-4 text-brand-500" />
+                  Activity Log
+                  {isRunning && <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />}
+                  {isPausedForInput && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Awaiting your input</span>}
+                </h3>
+                {isPausedForInput && pendingQuestion && (
+                  <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-amber-700 mb-1">Agent needs your input</div>
+                    <pre className="text-sm text-amber-900 mb-3 whitespace-pre-wrap font-sans leading-relaxed">{pendingQuestion.question}</pre>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="text"
+                        value={answerInput}
+                        onChange={(e) => setAnswerInput(e.target.value)}
+                        placeholder="Type your answer and submit to continue"
+                        className="flex-1 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-amber-300"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            handleSubmitAnswer()
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={handleSubmitAnswer}
+                        disabled={answering || !answerInput.trim()}
+                        className="rounded-lg bg-amber-600 text-white px-4 py-2 text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
+                      >
+                        {answering ? 'Sending...' : 'Submit answer'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <EventLog events={events} stages={project.stages} />
+              </div>
+            </div>
+          </>
+        {/* )} */}
+
+ 
+
+        {!isRightSidebarCollapsed && (
+          <div className="hidden lg:block lg:col-span-1">
+            <div className="space-y-4 sticky top-6">
+              <div className="glass-card p-4">
+
+
+
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">Project Snapshot</h3>
+                <div className="space-y-2 text-xs text-gray-600">
+                  <div className="flex items-center justify-between gap-2">
+                    <span>Status</span>
+                    <StatusBadge status={project.status} />
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span>Figures</span>
+                    <span className="font-semibold text-gray-800">{figureCount}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span>Files</span>
+                    <span className="font-semibold text-gray-800">{fileCount}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span>Cost</span>
+                    <span className="font-semibold text-gray-800">{formatUsd(project.total_cost_usd)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="glass-card p-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">Quick Jump</h3>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {tabs.slice(0, 6).map(t => {
+                    const active = tab === t.key
+                    return (
+                      <button
+                        key={`quick-${t.key}`}
+                        onClick={() => setTab(t.key)}
+                        className={`text-left px-2.5 py-1.5 rounded-md text-xs transition-colors ${
+                          active ? 'bg-brand-50 text-brand-700 font-medium' : 'text-gray-600 hover:bg-gray-100'
+                        }`}
+                      >
+                        {t.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         )}
