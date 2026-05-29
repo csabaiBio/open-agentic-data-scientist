@@ -8,6 +8,7 @@ import logging
 import mimetypes
 import os
 from pathlib import Path
+from logging.handlers import RotatingFileHandler
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -16,6 +17,66 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 load_dotenv(override=True)
+
+
+def _configure_backend_file_logging() -> None:
+    """Configure optional file logging for the web backend.
+
+    Enabled when BACKEND_LOG_FILE is set.
+    """
+    raw_log_file = (os.getenv("BACKEND_LOG_FILE") or "").strip()
+    if not raw_log_file:
+        return
+
+    log_level_name = (os.getenv("BACKEND_LOG_LEVEL") or "INFO").strip().upper()
+    log_level = getattr(logging, log_level_name, logging.INFO)
+
+    log_path = Path(raw_log_file).expanduser()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_log_path = str(log_path.resolve())
+
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    file_handler = RotatingFileHandler(
+        filename=resolved_log_path,
+        maxBytes=int(os.getenv("BACKEND_LOG_MAX_BYTES", "5242880")),  # 5 MB
+        backupCount=int(os.getenv("BACKEND_LOG_BACKUP_COUNT", "3")),
+        encoding="utf-8",
+    )
+    file_handler.setLevel(log_level)
+    file_handler.setFormatter(formatter)
+
+    targets = [
+        logging.getLogger(),
+        logging.getLogger("uvicorn"),
+        logging.getLogger("uvicorn.error"),
+        logging.getLogger("uvicorn.access"),
+        logging.getLogger("fastapi"),
+        logging.getLogger("web.backend"),
+    ]
+
+    for target_logger in targets:
+        already_attached = any(
+            isinstance(handler, logging.FileHandler)
+            and getattr(handler, "baseFilename", "") == resolved_log_path
+            for handler in target_logger.handlers
+        )
+        if not already_attached:
+            target_logger.addHandler(file_handler)
+
+    root_logger = logging.getLogger()
+    if root_logger.level == logging.NOTSET or root_logger.level > log_level:
+        root_logger.setLevel(log_level)
+
+    logging.getLogger(__name__).info(
+        "Backend file logging enabled at %s (level=%s)",
+        resolved_log_path,
+        logging.getLevelName(log_level),
+    )
+
+
+_configure_backend_file_logging()
 
 # Suppress verbose logging from third-party libs
 for lib_name in ["LiteLLM", "litellm", "httpx", "httpcore", "openai", "anthropic", "google_adk"]:

@@ -20,6 +20,7 @@ class ProjectMode(str, Enum):
     ORCHESTRATED = "orchestrated"
     SIMPLE = "simple"
     DISCOVERY = "discovery"
+    RESUME = "resume"  # internal-only: set when resuming a stopped/failed project
 
 
 class StageStatus(str, Enum):
@@ -132,6 +133,8 @@ class Project(BaseModel):
     paper_content: Optional[str] = None
     in_silico_suggestions: Optional[str] = None
     experimental_suggestions: Optional[str] = None
+    # Set internally when the project is resumed; stores the mode used before resume
+    original_mode: Optional[ProjectMode] = None
     # Skills/tools used during the workflow
     skills_used: List[str] = Field(default_factory=list)
     # LLM usage accounting

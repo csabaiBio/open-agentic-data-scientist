@@ -1,5 +1,6 @@
 #!/bin/bash
 
+
 # Exit on any error
 set -e
 
@@ -8,6 +9,8 @@ ROOT_DIR=$(cd -- "$SCRIPT_DIR/.." && pwd)
 
 BACKEND_PORT=${BACKEND_PORT:-8765}
 BACKEND_HOST=${BACKEND_HOST:-0.0.0.0}
+BACKEND_LOG_FILE=${BACKEND_LOG_FILE:-"$ROOT_DIR/web/backend/backend.log"}
+BACKEND_LOG_LEVEL=${BACKEND_LOG_LEVEL:-INFO}
 VITE_HOST_NAME=${VITE_HOST_NAME:-"example.com"}
 VITE_HOST_IP=${VITE_HOST_IP:-127.0.0.1}
 VITE_FRONTEND_HOST=${VITE_FRONTEND_HOST:-0.0.0.0}
@@ -27,6 +30,8 @@ export VITE_HOST_IP
 export VITE_FRONTEND_PORT
 export VITE_BACKEND_PORT
 export VITE_FRONTEND_URL_PREFIX
+export BACKEND_LOG_FILE
+export BACKEND_LOG_LEVEL
 
 echo -e "\n \033[0;36m Agentic Data Scientist - Web UI\033[0m"
 echo -e "  \033[0;34m================================\033[0m\n"
@@ -46,6 +51,7 @@ fi
 
 # Start FastAPI backend
 echo -e "  \033[0;33mStarting backend ($BACKEND_HOST:$BACKEND_PORT)...\033[0m"
+echo -e "  \033[0;90mBackend logs: $BACKEND_LOG_FILE\033[0m"
 uv run python -m uvicorn web.backend.app:app --host "$BACKEND_HOST" --port "$BACKEND_PORT" --reload &
 BACKEND_PID=$!
 

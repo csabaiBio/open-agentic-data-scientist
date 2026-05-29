@@ -1,5 +1,5 @@
 export type ProjectStatus = 'pending' | 'running' | 'completed' | 'failed' | 'stopped' | 'awaiting_confirmation'
-export type ProjectMode = 'orchestrated' | 'simple' | 'discovery'
+export type ProjectMode = 'orchestrated' | 'simple' | 'discovery' | 'resume'
 export type StageStatus = 'pending' | 'running' | 'completed' | 'failed'
 
 export interface Stage {
@@ -127,7 +127,7 @@ export interface ProjectSummary {
   llm_config: ModelConfig | null
 }
 
-export type LlmModelType = 'openai' | 'anthropic' | 'local' | 'azure' | 'azure-anthropic'
+export type LlmModelType = 'openai' | 'anthropic' | 'local' | 'azure-openai' | 'azure-anthropic'
 
 export interface LlmModel {
   id: number

@@ -631,6 +631,17 @@ Requirements:
             anthropic_api_key = os.getenv("ANTHROPIC_API_KEY") or ""
             anthropic_auth_token = os.getenv("ANTHROPIC_AUTH_TOKEN") or ""
             openai_api_key = os.getenv("OPENAI_API_KEY") or ""
+            azure_anthropic_api_key = (
+                os.getenv("AZURE_ANTHROPIC_API_KEY")
+                or os.getenv("AZURE_API_KEY")
+                or ""
+            )
+            azure_custom_headers = os.getenv("ANTHROPIC_CUSTOM_HEADERS") or ""
+
+            # Avoid leaking provider-specific settings across runs in the same process.
+            if "azure" not in self._provider and "ANTHROPIC_CUSTOM_HEADERS" in env:
+                env.pop("ANTHROPIC_CUSTOM_HEADERS", None)
+                env.pop("CLAUDE_CODE_USE_FOUNDRY", None)
 
             if self._provider == "anthropic":
                 # Anthropic routes must use Anthropic credentials, never OpenAI keys.
@@ -638,6 +649,20 @@ Requirements:
                 if selected_key:
                     env["ANTHROPIC_API_KEY"] = selected_key
                     env["ANTHROPIC_AUTH_TOKEN"] = selected_key
+            elif "azure"  in self._provider:
+                # Azure Foundry Anthropic routes require api-key in custom headers.
+                # Keep Anthropic API key as a dummy value to satisfy SDK key validation.
+                selected_key = coding_api_key or azure_anthropic_api_key
+                if selected_key:
+                    env["ANTHROPIC_CUSTOM_HEADERS"] = f"api-key:{selected_key}"
+                elif azure_custom_headers:
+                    # Preserve externally supplied header override if present.
+                    env["ANTHROPIC_CUSTOM_HEADERS"] = azure_custom_headers
+
+                env["ANTHROPIC_FOUNDRY_RESOURCE"] = env["AZURE_BASE_URL"].split("//")[1].split(".")[0]
+                env["CLAUDE_CODE_USE_FOUNDRY"]="1"
+                env["ANTHROPIC_FOUNDRY_API_KEY"] = coding_api_key
+                env["ANTHROPIC_AUTH_TOKEN"] = env["ANTHROPIC_API_KEY"]
             elif self._provider == "openai":
                 # OpenAI-routed Claude Code uses OPENAI_API_KEY via SDK internals.
                 selected_key = coding_api_key or openai_api_key
@@ -669,6 +694,12 @@ Requirements:
                     or os.getenv("OLLAMA_BASE_URL")
                     or os.getenv("LOCAL_LLM_API_BASE")
                     or "http://localhost:11434"
+                )
+            elif "azure" not in self._provider:
+                coding_api_base = (
+                    self._model_config.get("coding_api_base")
+                    or os.getenv("AZURE_ANTHROPIC_URL")
+                    or _env_api_base
                 )
             else:
                 coding_api_base = (
@@ -731,6 +762,8 @@ Requirements:
                 env["AWS_BEARER_TOKEN_BEDROCK"] = bedrock_api_key
                 env["AWS_REGION"] = os.getenv("AWS_REGION_NAME", AWS_REGION_NAME)
 
+            logger.info(f"[Claude Code] Environment for SDK: { {k: ('<redacted>' if 'KEY' in k or 'TOKEN' in k else v) for k, v in env.items()} }")
+
             # Create options for Claude Agent SDK
             # Skills are loaded from .claude/skills/ via setting_sources
             # MCP servers are loaded from .claude/settings.json via setting_sources
@@ -740,6 +773,7 @@ Requirements:
                 permission_mode="bypassPermissions",
                 model=self.model,
                 env=env,
+                stderr=logger.info,  # Redirect SDK internal logs to our logger
                 cli_path=cli_path,
                 system_prompt={"type": "preset", "preset": "claude_code", "append": system_instructions},
                 setting_sources=["project", "user", "local"],

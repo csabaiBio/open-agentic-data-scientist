@@ -548,32 +548,26 @@ class ProjectManager:
         if existing_task and not existing_task.done():
             return False
 
-        # Reset status
+        # Reset status; switch to dedicated RESUME mode (original preserved in original_mode)
         project.status = ProjectStatus.RUNNING
         project.started_at = _now()
         project.completed_at = None
         project.error = None
-        
-        
-        # For discovery mode, reset discovery phase to restart from scratch
-        if project.mode == ProjectMode.DISCOVERY:
-            project.discovery_phase = None
-            project.discovery = None
-        
+
+        # Store the original mode before switching to RESUME
+        if project.mode != ProjectMode.RESUME:
+            project.original_mode = project.mode
+        project.mode = ProjectMode.RESUME
+
         self._save_project(project)
 
         self._emit_event(project_id, ProjectEvent(
             type="status",
-            content="Resuming project — existing files are preserved in the working directory.",
+            content="Resuming project in resume mode — existing files are preserved in the working directory.",
             author="system",
             timestamp=_now(),
             metadata={"status": "running", "phase": "resume"},
         ))
-
-        self._emit_resume_checkpoint_summary(project_id)
-
-        # Lightweight bootstrap for simple checkpoint-style resume context.
-        # self._run_resume_bootstrap(project_id, project)
 
         # Scan working directory so existing files are immediately visible in the API
         self._scan_files(project)
@@ -587,20 +581,184 @@ class ProjectManager:
                 if f.is_file():
                     uploaded_files.append((f.name, f))
 
-        # For discovery mode, restart the full _run_project pipeline (discovery + analysis)
-        # For other modes, resume the analysis phase only
-        if project.mode == ProjectMode.DISCOVERY:
-            task = asyncio.create_task(
-                self._run_project(project_id, uploaded_files)
-            )
-        else:
-            analysis_query = project.analysis_query or project.query
-            task = asyncio.create_task(
-                self._run_analysis_safe(project_id, analysis_query, uploaded_files)
-            )
-        
+        task = asyncio.create_task(
+            self._run_resume_safe(project_id, uploaded_files)
+        )
+
         self._running_tasks[project_id] = task
         return True
+
+    def _build_resume_prompt(self, project: "Project", working_dir: Path) -> str:
+        """Build a context-rich prompt for the RESUME workflow.
+
+        Reads the checkpoint.json (if it exists) for prior summaries/findings,
+        lists all files in the working directory, and wraps everything with the
+        original query so the agent can continue intelligently.
+        """
+        original_query = project.analysis_query or project.query
+        original_mode = (project.original_mode or ProjectMode.ORCHESTRATED).value
+
+        lines: List[str] = [
+            "# Resume Analysis",
+            "",
+            "You are continuing an analysis that was previously interrupted or stopped.",
+            "All previously generated files are still present in your working directory.",
+            "",
+            f"## Original Task",
+            "",
+            original_query,
+            "",
+            f"## Original Execution Mode",
+            "",
+            f"`{original_mode}`",
+            "",
+        ]
+
+        # ── Checkpoint summary ────────────────────────────────────
+        readme_path = working_dir / "README.md"
+        try:
+            checkpoint_store = ReadmeCheckpointStore(readme_path=readme_path)
+            checkpoint_state = checkpoint_store.load_resume_state()
+            latest_summary = checkpoint_state.get("latest_summary")
+
+            if latest_summary:
+                summary_text = str(latest_summary.get("summary") or "").strip()
+                summary_ts = str(latest_summary.get("timestamp") or "")
+                findings = latest_summary.get("findings") or []
+                files_list = latest_summary.get("files") or []
+                events_after = checkpoint_state.get("events_after_summary") or []
+
+                lines += [
+                    "## Prior Progress (from checkpoint)",
+                    "",
+                    f"*Last saved: {summary_ts}*",
+                    "",
+                    summary_text,
+                    "",
+                ]
+                if findings:
+                    lines += ["### Key Findings So Far", ""]
+                    for f in findings:
+                        lines.append(f"- {f}")
+                    lines.append("")
+
+                if files_list:
+                    lines += ["### Files Recorded in Checkpoint", ""]
+                    for fentry in files_list:
+                        path = fentry.get("path", "")
+                        purpose = fentry.get("purpose", "")
+                        lines.append(f"- `{path}`" + (f" — {purpose}" if purpose else ""))
+                    lines.append("")
+
+                if events_after:
+                    lines += [
+                        f"### Events After Last Checkpoint ({len(events_after)} event(s))",
+                        "",
+                    ]
+                    for ev in events_after[-10:]:  # last 10 events
+                        ev_type = ev.get("event_type", "")
+                        ev_msg = str(ev.get("message", "")).strip()
+                        if ev_msg:
+                            lines.append(f"- [{ev_type}] {ev_msg}")
+                    lines.append("")
+        except Exception:
+            pass
+
+        # ── Existing files in working dir ─────────────────────────
+        try:
+            existing_files: List[str] = []
+            for p in sorted(working_dir.rglob("*")):
+                if p.is_file() and not any(part.startswith(".") for part in p.parts):
+                    try:
+                        rel = p.relative_to(working_dir)
+                        existing_files.append(str(rel))
+                    except ValueError:
+                        pass
+            if existing_files:
+                lines += ["## Existing Files in Working Directory", ""]
+                for fp in existing_files[:100]:
+                    lines.append(f"- `{fp}`")
+                if len(existing_files) > 100:
+                    lines.append(f"- … and {len(existing_files) - 100} more")
+                lines.append("")
+        except Exception:
+            pass
+
+        lines += [
+            "## Instructions",
+            "",
+            "1. Review the existing files and any checkpoint summary above.",
+            "2. Determine what has already been completed and what remains.",
+            "3. Continue the analysis from where it left off — do not redo completed work.",
+            "4. Produce any remaining outputs (figures, reports, statistics, etc.) required by the original task.",
+        ]
+
+        return "\n".join(lines)
+
+    async def _run_resume_safe(self, project_id: str, uploaded_files: List[tuple]):
+        """Error-handling wrapper for _run_resume."""
+        project = self._projects.get(project_id)
+        if not project:
+            return
+        try:
+            await self._run_resume(project_id, uploaded_files)
+        except asyncio.CancelledError:
+            project.status = ProjectStatus.STOPPED
+            project.completed_at = _now()
+            self._save_project(project)
+        except Exception as e:
+            logger.exception(f"Project {project_id} resume failed")
+            error_text = str(e)
+            project.error = error_text
+            if _is_claude_code_failure(error_text):
+                project.status = ProjectStatus.STOPPED
+            else:
+                project.status = ProjectStatus.FAILED
+            project.completed_at = _now()
+            self._save_project(project)
+            self._emit_event(project_id, ProjectEvent(
+                type="error", content=str(e),
+                author="system", timestamp=_now(),
+            ))
+        finally:
+            self._running_tasks.pop(project_id, None)
+            for queue in self._event_queues.get(project_id, []):
+                try:
+                    queue.put_nowait(None)
+                except asyncio.QueueFull:
+                    pass
+
+    async def _run_resume(self, project_id: str, uploaded_files: List[tuple]):
+        """Execute the RESUME workflow.
+
+        Builds a rich context prompt from the checkpoint state and previously
+        generated files, then runs the coding agent to continue the analysis.
+        After the agent finishes the project mode is restored to original_mode.
+        """
+        project = self._projects.get(project_id)
+        if not project:
+            return
+
+        working_dir = self._get_project_working_dir(project_id)
+
+        resume_prompt = self._build_resume_prompt(project, working_dir)
+
+        self._emit_event(project_id, ProjectEvent(
+            type="status",
+            content="Resume context built. Starting agent to continue analysis...",
+            author="system",
+            timestamp=_now(),
+            metadata={"phase": "resume", "prompt_length": len(resume_prompt)},
+        ))
+
+        # Run the analysis using the resume prompt
+        await self._run_analysis(project_id, resume_prompt, uploaded_files)
+
+        # Restore original mode now that resume is complete
+        project = self._projects.get(project_id)
+        if project and project.original_mode is not None:
+            project.mode = project.original_mode
+            self._save_project(project)
 
     def subscribe(self, project_id: str) -> asyncio.Queue:
         """Subscribe to real-time events for a project."""
@@ -957,7 +1115,14 @@ class ProjectManager:
             return
 
         working_dir = self._get_project_working_dir(project_id)
-        agent_type = "adk" if project.mode in (ProjectMode.ORCHESTRATED, ProjectMode.DISCOVERY) else "claude_code"
+        # RESUME always uses claude_code for reliable continuation with rich context prompt.
+        # Orchestrated/Discovery use the multi-agent ADK pipeline.
+        if project.mode == ProjectMode.RESUME:
+            agent_type = "claude_code"
+        elif project.mode in (ProjectMode.ORCHESTRATED, ProjectMode.DISCOVERY):
+            agent_type = "adk"
+        else:
+            agent_type = "claude_code"
 
         # Build model_config dict from project settings
         mc = None
@@ -967,6 +1132,10 @@ class ProjectManager:
             coding_provider = (project.llm_config.coding_provider or "openai").strip().lower()
             coding_api_base = (project.llm_config.coding_api_base or "").strip() or None
             coding_api_key = str((mc or {}).get("coding_api_key") or "").strip() or None
+
+            if coding_provider != "azure-anthropic":
+                os.environ.pop("ANTHROPIC_CUSTOM_HEADERS", None)
+
             if coding_api_base:
                 os.environ["ANTHROPIC_BASE_URL"] = coding_api_base
                 os.environ["ANTHROPIC_API_BASE"] = coding_api_base
@@ -974,16 +1143,20 @@ class ProjectManager:
                 # Local Anthropic-compatible servers (e.g., Ollama) need this token.
                 if coding_provider == "local":
                     os.environ["ANTHROPIC_AUTH_TOKEN"] = "ollama"
-                # Azure-hosted Anthropic models use the same env var setup as local Anthropic
+                # Azure-hosted Anthropic models use custom API-key headers.
                 if coding_provider == "azure-anthropic":
-                    os.environ["ANTHROPIC_AUTH_TOKEN"] = coding_api_key or "ollama"
+                    if coding_api_key:
+                        os.environ["ANTHROPIC_CUSTOM_HEADERS"] = f"api-key: {coding_api_key}"
+                    os.environ["ANTHROPIC_API_KEY"] = "sk-dummy-key-to-bypass-validation"
+                    os.environ["ANTHROPIC_AUTH_TOKEN"] = "sk-dummy-key-to-bypass-validation"
             if coding_api_key:
                 if coding_provider == "anthropic":
                     os.environ["ANTHROPIC_API_KEY"] = coding_api_key
                     os.environ["ANTHROPIC_AUTH_TOKEN"] = coding_api_key
                 elif coding_provider == "azure-anthropic":
-                    os.environ["ANTHROPIC_API_KEY"] = coding_api_key
-                    os.environ["ANTHROPIC_AUTH_TOKEN"] = coding_api_key
+                    os.environ["ANTHROPIC_CUSTOM_HEADERS"] = f"api-key: {coding_api_key}"
+                    os.environ["ANTHROPIC_API_KEY"] = "sk-dummy-key-to-bypass-validation"
+                    os.environ["ANTHROPIC_AUTH_TOKEN"] = "sk-dummy-key-to-bypass-validation"
                 elif coding_provider == "openai":
                     os.environ["OPENAI_API_KEY"] = coding_api_key
                 elif coding_provider == "azure-openai":

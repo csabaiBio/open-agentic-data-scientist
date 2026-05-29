@@ -416,7 +416,7 @@ export default function Dashboard() {
           </div>
           <button onClick={() => setShowNew(prev => !prev)} className="flex items-center gap-2 px-3 py-2 bg-brand-600 text-white rounded-lg font-medium text-xs shadow-sm hover:bg-brand-700 transition-colors">
             {showNew ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-            {showNew ? 'Close' : 'New'}
+            {showNew ? 'Close' : 'Settings'}
           </button>
         </div>
 
@@ -424,11 +424,7 @@ export default function Dashboard() {
 
         {showNew && (
           <div className="glass-card p-4 space-y-4 animate-slide-up">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold flex items-center gap-2"><Sparkles className="w-5 h-5 text-brand-500" />New Analysis</h2>
-              <button onClick={() => setShowNew(false)} className="p-1.5 rounded-lg hover:bg-gray-100"><X className="w-4 h-4 text-gray-400" /></button>
-            </div>
-
+            
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">Analysis Mode</label>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -467,18 +463,45 @@ export default function Dashboard() {
               </div>
             )}
 
-            <div className="border border-gray-200 rounded-xl overflow-hidden">
-              <button onClick={() => setShowModelSettings(prev => !prev)} className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
-                <span className="flex items-center gap-2"><Settings2 className="w-4 h-4 text-gray-400" />Model Settings</span>
-                {showModelSettings ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
-              </button>
-              {showModelSettings && (
-                <div className="px-4 pb-4 space-y-4 border-t border-gray-100">
+           
+             
+              <div className="rounded-xl border border-gray-200 bg-gray-100/80 p-3.5 space-y-2">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-700">Interaction</div>
+                    <label className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 cursor-pointer">
+                      <span className="text-sm text-gray-700">Human in the loop</span>
+                      <input
+                        type="checkbox"
+                        checked={humanInTheLoop}
+                        onChange={(e) => setHumanInTheLoop(e.target.checked)}
+                        className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-400"
+                      />
+                    </label>
+                    <p className="text-[11px] text-gray-500 leading-relaxed">
+                      <span className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-gray-300 text-gray-600 font-semibold mr-1 align-middle">?</span>
+                      When enabled, the agent can pause and ask clarifying questions if your request is ambiguous. You can answer in the Activity Log to continue.
+                    </p>
+                  </div>
+                  <div className={`rounded-xl border p-3.5 space-y-3 ${modelSettingsNeedsAttention ? 'border-rose-300 bg-rose-50/70' : 'border-gray-200 bg-gray-100/80'}`}>
+                    <div className="flex items-center justify-between gap-2"><div className="text-xs font-semibold uppercase tracking-wide text-gray-700">Model Selection</div><span className={`text-[10px] px-2 py-0.5 rounded-full ${modelSettingsNeedsAttention ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'}`}>{modelSettingsNeedsAttention ? 'Select valid model' : 'Role Assignment'}</span></div>
+                    {modelSettingsNeedsAttention && <div className="text-[11px] text-rose-700 bg-rose-100 border border-rose-200 rounded-md px-2 py-1">The selected model was not found. Add it again or choose another saved model before starting analysis.</div>}
+                    <div className="space-y-2">
+                      {mode !== 'simple' && <div><label className="block text-xs font-medium text-gray-500 mb-1">Planning Model</label><select value={planningLlmModelId} onChange={(e) => applySelectedModelToRole('planning', e.target.value ? Number(e.target.value) : '')} className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"><option value="">Select planning model</option>{llmModels.map(model => (<option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>))}</select></div>}
+                      {mode !== 'simple' && <div><label className="block text-xs font-medium text-gray-500 mb-1">Review Model</label><select value={reviewLlmModelId} onChange={(e) => applySelectedModelToRole('review', e.target.value ? Number(e.target.value) : '')} className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"><option value="">Select review model</option>{llmModels.map(model => (<option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>))}</select></div>}
+                      {mode !== 'discovery' && <div><label className="block text-xs font-medium text-gray-500 mb-1">Coding Model</label><select value={codingLlmModelId} onChange={(e) => applySelectedModelToRole('coding', e.target.value ? Number(e.target.value) : '')} className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"><option value="">Select coding model</option>{llmModels.map(model => (<option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>))}</select><p className="text-[10px] text-gray-400 mt-1">If no saved coding model is selected, default is <span className="font-medium text-gray-500">claude-sonnet-4-5</span>.</p></div>}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-gray-200 bg-gray-100/80 p-3.5 space-y-3">
+                    <div className="flex items-center justify-between gap-2"><div className="text-xs font-semibold uppercase tracking-wide text-gray-700">Cost Limit</div><span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Budget Guardrail</span></div>
+                    <div><label className="block text-xs font-medium text-gray-500 mb-1">Max Cost (USD) <span className="text-gray-300">(optional stop limit)</span></label><input type="number" min="0" step="0.01" value={maxCostUsd} onChange={e => { const value = e.target.value; setMaxCostUsd(value === '' ? '' : Math.max(0, Number(value))) }} placeholder="e.g. 2.50" className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none" /></div>
+                  </div>
+               
+              
                   <div className={`rounded-xl border p-3.5 space-y-3 ${modelSettingsNeedsAttention ? 'border-rose-300 bg-rose-50/70' : 'border-gray-200 bg-gray-100/80'}`}>
                     <div className="text-[11px] text-gray-500">Models are stored in SQLite with type, model name, provider URL, and an optional provider API key that stays on the backend.</div>
                     <div className="rounded-lg border bg-white p-3 space-y-2">
                       <div className="text-xs font-medium text-gray-600">Add LLM Model</div>
-                      <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
+                      <div className="flex flex-col gap-2">
                         <select value={newLlmType} onChange={(e) => { setModelSettingsNeedsAttention(false); setNewLlmType(e.target.value as LlmModelType) }} className="px-2.5 py-2 rounded-lg border border-gray-200 text-sm bg-white"><option value="openai">openai</option><option value="anthropic">anthropic</option><option value="local">local</option><option value="azure-openai">azure-openai</option><option value="azure-anthropic">azure-anthropic</option></select>
                         <input value={newLlmProviderUrl} onChange={(e) => { setModelSettingsNeedsAttention(false); setNewLlmProviderUrl(e.target.value) }} placeholder="provider_url" className="px-3 py-2 rounded-lg border border-gray-200 text-sm" />
                         <input value={newLlmModelName} onChange={(e) => { setModelSettingsNeedsAttention(false); setNewLlmModelName(e.target.value) }} placeholder="model_name" className="px-3 py-2 rounded-lg border border-gray-200 text-sm" />
@@ -501,43 +524,10 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  <div className={`rounded-xl border p-3.5 space-y-3 ${modelSettingsNeedsAttention ? 'border-rose-300 bg-rose-50/70' : 'border-gray-200 bg-gray-100/80'}`}>
-                    <div className="flex items-center justify-between gap-2"><div className="text-xs font-semibold uppercase tracking-wide text-gray-700">Model Selection</div><span className={`text-[10px] px-2 py-0.5 rounded-full ${modelSettingsNeedsAttention ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'}`}>{modelSettingsNeedsAttention ? 'Select valid model' : 'Role Assignment'}</span></div>
-                    {modelSettingsNeedsAttention && <div className="text-[11px] text-rose-700 bg-rose-100 border border-rose-200 rounded-md px-2 py-1">The selected model was not found. Add it again or choose another saved model before starting analysis.</div>}
-                    <div className="space-y-2">
-                      {mode !== 'simple' && <div><label className="block text-xs font-medium text-gray-500 mb-1">Planning Model</label><select value={planningLlmModelId} onChange={(e) => applySelectedModelToRole('planning', e.target.value ? Number(e.target.value) : '')} className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"><option value="">Select planning model</option>{llmModels.map(model => (<option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>))}</select></div>}
-                      {mode !== 'simple' && <div><label className="block text-xs font-medium text-gray-500 mb-1">Review Model</label><select value={reviewLlmModelId} onChange={(e) => applySelectedModelToRole('review', e.target.value ? Number(e.target.value) : '')} className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"><option value="">Select review model</option>{llmModels.map(model => (<option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>))}</select></div>}
-                      {mode !== 'discovery' && <div><label className="block text-xs font-medium text-gray-500 mb-1">Coding Model</label><select value={codingLlmModelId} onChange={(e) => applySelectedModelToRole('coding', e.target.value ? Number(e.target.value) : '')} className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"><option value="">Select coding model</option>{llmModels.map(model => (<option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>))}</select><p className="text-[10px] text-gray-400 mt-1">If no saved coding model is selected, default is <span className="font-medium text-gray-500">claude-sonnet-4-5</span>.</p></div>}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-gray-200 bg-gray-100/80 p-3.5 space-y-3">
-                    <div className="flex items-center justify-between gap-2"><div className="text-xs font-semibold uppercase tracking-wide text-gray-700">Cost Limit</div><span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Budget Guardrail</span></div>
-                    <div><label className="block text-xs font-medium text-gray-500 mb-1">Max Cost (USD) <span className="text-gray-300">(optional stop limit)</span></label><input type="number" min="0" step="0.01" value={maxCostUsd} onChange={e => { const value = e.target.value; setMaxCostUsd(value === '' ? '' : Math.max(0, Number(value))) }} placeholder="e.g. 2.50" className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none" /></div>
-                  </div>
+                  
 
                   
                 </div>
-              )}
-            </div>
-              <div className="rounded-xl border border-gray-200 bg-gray-100/80 p-3.5 space-y-2">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-700">Interaction</div>
-                    <label className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 cursor-pointer">
-                      <span className="text-sm text-gray-700">Human in the loop</span>
-                      <input
-                        type="checkbox"
-                        checked={humanInTheLoop}
-                        onChange={(e) => setHumanInTheLoop(e.target.checked)}
-                        className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-400"
-                      />
-                    </label>
-                    <p className="text-[11px] text-gray-500 leading-relaxed">
-                      <span className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-gray-300 text-gray-600 font-semibold mr-1 align-middle">?</span>
-                      When enabled, the agent can pause and ask clarifying questions if your request is ambiguous. You can answer in the Activity Log to continue.
-                    </p>
-                  </div>
-
-          </div>
         )}
          <div className="glass-card p-3 space-y-2">
           <div className="flex items-center justify-between px-1">
