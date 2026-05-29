@@ -15,7 +15,7 @@ export default function Layout() {
               <FlaskConical className="w-4.5 h-4.5 text-white" />
             </div>
             <span className="font-semibold text-[15px] tracking-tight text-gray-900">
-              Agentic Data Scientist
+              AI Data Scientist
             </span>
           </Link>
 

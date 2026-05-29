@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Search, Clock, FileStack, Trash2, Loader2, Upload, X, Sparkles, Compass, Settings2, ChevronDown, ChevronUp, Coins } from 'lucide-react'
+import { Plus, Search, Clock, FileStack, Trash2, Loader2, Upload, X, Sparkles, Compass, Settings2, ChevronDown, ChevronUp, Coins, FolderOpen } from 'lucide-react'
 import {
   fetchProjects,
   createProject,
@@ -63,7 +63,7 @@ function toYamlScalar(value: string | number | boolean | null): string {
 
 function dashboardConfigToYaml(config: DashboardConfigPayload): string {
   const lines = [
-    '# Agentic Data Scientist Dashboard Config',
+    '# AI Data Scientist Dashboard Config',
     '# Note: uploaded files are not included in this config.',
   ]
 
@@ -323,11 +323,12 @@ export default function Dashboard() {
   }, [llmModels])
 
   useEffect(() => {
+    if (showNew) return
     if (projects.length === 0) return
     if (!selectedProjectId || !projects.some(project => project.id === selectedProjectId)) {
       setSelectedProjectId(projects[0].id)
     }
-  }, [projects, selectedProjectId])
+  }, [projects, selectedProjectId, showNew])
 
   const handleDownloadConfigYaml = () => {
     const yaml = dashboardConfigToYaml(getCurrentDashboardConfig())
@@ -407,276 +408,291 @@ export default function Dashboard() {
   const selectedProject = projects.find(project => project.id === selectedProjectId) ?? null
 
   return (
-    <div className="w-full max-w-none grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)_340px] gap-6">
-      <aside className="sticky top-0 self-start h-screen overflow-y-auto pr-1 space-y-4">
-        <div className="glass-card p-4 flex items-center justify-between gap-3">
-          <div>
-            <h1 className="text-lg font-bold tracking-tight text-gray-900">New Session</h1>
-            <p className="text-xs text-gray-500 mt-1">Start a new analysis or open a previous project</p>
+    <div className="w-full max-w-none space-y-4">
+      <div className="glass-card p-4 space-y-3">
+        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Project Summary</div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <div className="text-[10px] uppercase tracking-wide text-gray-500">Total</div>
+            <div className="text-lg font-semibold text-gray-900 mt-1">{projects.length}</div>
           </div>
-          <button onClick={() => setShowNew(prev => !prev)} className="flex items-center gap-2 px-3 py-2 bg-brand-600 text-white rounded-lg font-medium text-xs shadow-sm hover:bg-brand-700 transition-colors">
-            {showNew ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-            {showNew ? 'Close' : 'Settings'}
-          </button>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <div className="text-[10px] uppercase tracking-wide text-gray-500">Active</div>
+            <div className="text-lg font-semibold text-blue-700 mt-1">{activeProjects}</div>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <div className="text-[10px] uppercase tracking-wide text-gray-500">Completed</div>
+            <div className="text-lg font-semibold text-emerald-700 mt-1">{completedProjects}</div>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <div className="text-[10px] uppercase tracking-wide text-gray-500">Spend</div>
+            <div className="text-lg font-semibold text-emerald-700 mt-1">{formatUsd(totalProjectCost)}</div>
+          </div>
         </div>
+      </div>
 
-       
+      <div className="grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)] gap-6">
+        <aside className="sticky top-0 self-start h-screen overflow-y-auto pr-1 space-y-4">
+          <div
+            onClick={() => {
+              setShowNew(true)
+              setSelectedProjectId('')
+            }}
+            className="p-4 cursor-pointer rounded-2xl border border-brand-200 bg-brand-50/80 hover:bg-brand-100/70 hover:shadow-sm transition-all"
+          >
+            <h1 className="text-lg font-bold tracking-tight text-brand-800">New Project</h1>
+            <p className="text-xs text-brand-700/80 mt-1">Start a new analysis session</p>
+          </div>
 
-        {showNew && (
-          <div className="glass-card p-4 space-y-4 animate-slide-up">
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Analysis Mode</label>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                <button onClick={() => setMode('orchestrated')} className={`px-4 py-3 rounded-xl border text-sm font-medium text-left transition-all ${mode === 'orchestrated' ? 'border-brand-400 bg-brand-50 text-brand-700 ring-2 ring-brand-100' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
-                  <div className="font-semibold">Orchestrated</div><div className="text-xs mt-0.5 opacity-70">Multi-agent with planning & review</div>
-                </button>
-                <button onClick={() => setMode('simple')} className={`px-4 py-3 rounded-xl border text-sm font-medium text-left transition-all ${mode === 'simple' ? 'border-brand-400 bg-brand-50 text-brand-700 ring-2 ring-brand-100' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
-                  <div className="font-semibold">Simple</div><div className="text-xs mt-0.5 opacity-70">Direct coding, faster & cheaper</div>
-                </button>
-                <button onClick={() => setMode('discovery')} className={`px-4 py-3 rounded-xl border text-sm font-medium text-left transition-all ${mode === 'discovery' ? 'border-violet-400 bg-violet-50 text-violet-700 ring-2 ring-violet-100' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
-                  <div className="font-semibold">Discovery</div><div className="text-xs mt-0.5 opacity-70">PubMed literature + novel hypothesis</div>
-                </button>
-              </div>
+          <div className="glass-card p-3 space-y-2">
+            <div className="flex items-center justify-between px-1">
+              <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Previous Projects</div>
+              <div className="text-[10px] text-gray-400">{projects.length}</div>
             </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Input Files <span className="text-gray-400 font-normal">(optional)</span></label>
-              <label className="flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 border-dashed border-gray-200 hover:border-brand-300 cursor-pointer transition-colors bg-gray-50/50">
-                <Upload className="w-4 h-4 text-gray-400" />
-                <span className="text-sm text-gray-500">{files.length > 0 ? `${files.length} file(s) selected` : 'Click to upload files'}</span>
-                <input type="file" multiple className="hidden" onChange={(e) => setFiles(Array.from(e.target.files || []))} />
-              </label>
-            </div>
-
-            {mode === 'discovery' && (
-              <div className="p-4 rounded-xl bg-violet-50/60 border border-violet-100 space-y-4">
-                <div className="flex items-center gap-2 text-sm font-medium text-violet-700"><Compass className="w-4 h-4" />Discovery Settings</div>
-                <div>
-                  <div className="flex items-center justify-between mb-1"><label className="text-sm text-gray-600">Number of papers</label><span className="text-sm font-semibold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-md">{numPapers}</span></div>
-                  <input type="range" min={1} max={20} value={numPapers} onChange={(e) => setNumPapers(Number(e.target.value))} className="w-full h-1.5 rounded-full bg-violet-200 appearance-none cursor-pointer accent-violet-600" />
-                </div>
-                <div>
-                  <div className="flex items-center justify-between mb-1"><label className="text-sm text-gray-600">Look back period</label><span className="text-sm font-semibold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-md">{yearsBack} year{yearsBack === 1 ? '' : 's'}</span></div>
-                  <input type="range" min={1} max={30} value={yearsBack} onChange={(e) => setDaysBack(Number(e.target.value) * 365)} className="w-full h-1.5 rounded-full bg-violet-200 appearance-none cursor-pointer accent-violet-600" />
-                </div>
+            {loading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 text-brand-500 animate-spin" />
               </div>
-            )}
-
-           
-             
-              <div className="rounded-xl border border-gray-200 bg-gray-100/80 p-3.5 space-y-2">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-gray-700">Interaction</div>
-                    <label className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 cursor-pointer">
-                      <span className="text-sm text-gray-700">Human in the loop</span>
-                      <input
-                        type="checkbox"
-                        checked={humanInTheLoop}
-                        onChange={(e) => setHumanInTheLoop(e.target.checked)}
-                        className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-400"
-                      />
-                    </label>
-                    <p className="text-[11px] text-gray-500 leading-relaxed">
-                      <span className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-gray-300 text-gray-600 font-semibold mr-1 align-middle">?</span>
-                      When enabled, the agent can pause and ask clarifying questions if your request is ambiguous. You can answer in the Activity Log to continue.
-                    </p>
-                  </div>
-                  <div className={`rounded-xl border p-3.5 space-y-3 ${modelSettingsNeedsAttention ? 'border-rose-300 bg-rose-50/70' : 'border-gray-200 bg-gray-100/80'}`}>
-                    <div className="flex items-center justify-between gap-2"><div className="text-xs font-semibold uppercase tracking-wide text-gray-700">Model Selection</div><span className={`text-[10px] px-2 py-0.5 rounded-full ${modelSettingsNeedsAttention ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'}`}>{modelSettingsNeedsAttention ? 'Select valid model' : 'Role Assignment'}</span></div>
-                    {modelSettingsNeedsAttention && <div className="text-[11px] text-rose-700 bg-rose-100 border border-rose-200 rounded-md px-2 py-1">The selected model was not found. Add it again or choose another saved model before starting analysis.</div>}
-                    <div className="space-y-2">
-                      {mode !== 'simple' && <div><label className="block text-xs font-medium text-gray-500 mb-1">Planning Model</label><select value={planningLlmModelId} onChange={(e) => applySelectedModelToRole('planning', e.target.value ? Number(e.target.value) : '')} className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"><option value="">Select planning model</option>{llmModels.map(model => (<option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>))}</select></div>}
-                      {mode !== 'simple' && <div><label className="block text-xs font-medium text-gray-500 mb-1">Review Model</label><select value={reviewLlmModelId} onChange={(e) => applySelectedModelToRole('review', e.target.value ? Number(e.target.value) : '')} className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"><option value="">Select review model</option>{llmModels.map(model => (<option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>))}</select></div>}
-                      {mode !== 'discovery' && <div><label className="block text-xs font-medium text-gray-500 mb-1">Coding Model</label><select value={codingLlmModelId} onChange={(e) => applySelectedModelToRole('coding', e.target.value ? Number(e.target.value) : '')} className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"><option value="">Select coding model</option>{llmModels.map(model => (<option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>))}</select><p className="text-[10px] text-gray-400 mt-1">If no saved coding model is selected, default is <span className="font-medium text-gray-500">claude-sonnet-4-5</span>.</p></div>}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-gray-200 bg-gray-100/80 p-3.5 space-y-3">
-                    <div className="flex items-center justify-between gap-2"><div className="text-xs font-semibold uppercase tracking-wide text-gray-700">Cost Limit</div><span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Budget Guardrail</span></div>
-                    <div><label className="block text-xs font-medium text-gray-500 mb-1">Max Cost (USD) <span className="text-gray-300">(optional stop limit)</span></label><input type="number" min="0" step="0.01" value={maxCostUsd} onChange={e => { const value = e.target.value; setMaxCostUsd(value === '' ? '' : Math.max(0, Number(value))) }} placeholder="e.g. 2.50" className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none" /></div>
-                  </div>
-               
-              
-                  <div className={`rounded-xl border p-3.5 space-y-3 ${modelSettingsNeedsAttention ? 'border-rose-300 bg-rose-50/70' : 'border-gray-200 bg-gray-100/80'}`}>
-                    <div className="text-[11px] text-gray-500">Models are stored in SQLite with type, model name, provider URL, and an optional provider API key that stays on the backend.</div>
-                    <div className="rounded-lg border bg-white p-3 space-y-2">
-                      <div className="text-xs font-medium text-gray-600">Add LLM Model</div>
-                      <div className="flex flex-col gap-2">
-                        <select value={newLlmType} onChange={(e) => { setModelSettingsNeedsAttention(false); setNewLlmType(e.target.value as LlmModelType) }} className="px-2.5 py-2 rounded-lg border border-gray-200 text-sm bg-white"><option value="openai">openai</option><option value="anthropic">anthropic</option><option value="local">local</option><option value="azure-openai">azure-openai</option><option value="azure-anthropic">azure-anthropic</option></select>
-                        <input value={newLlmProviderUrl} onChange={(e) => { setModelSettingsNeedsAttention(false); setNewLlmProviderUrl(e.target.value) }} placeholder="provider_url" className="px-3 py-2 rounded-lg border border-gray-200 text-sm" />
-                        <input value={newLlmModelName} onChange={(e) => { setModelSettingsNeedsAttention(false); setNewLlmModelName(e.target.value) }} placeholder="model_name" className="px-3 py-2 rounded-lg border border-gray-200 text-sm" />
-                        <input type="password" value={newLlmApiKey} onChange={(e) => { setModelSettingsNeedsAttention(false); setNewLlmApiKey(e.target.value) }} placeholder="provider_api_key (optional)" className="px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+            ) : projects.length === 0 ? (
+              <div className="text-center py-6 px-4">
+                <Search className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                <h3 className="text-sm font-medium text-gray-600">No projects yet</h3>
+              </div>
+            ) : (
+              projects.map((p) => {
+                const isSelected = p.id === selectedProjectId
+                return (
+                  <div key={p.id} onClick={() => { setSelectedProjectId(p.id); setShowNew(false) }} className={`glass-card-hover px-3 py-2.5 cursor-pointer border ${isSelected ? 'border-brand-300 bg-brand-50/50' : 'border-transparent'}`}>
+                    <div className="flex items-start gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1"><StatusBadge status={p.status} /><span className="text-xs text-gray-400 capitalize px-2 py-0.5 bg-gray-100 rounded-md">{p.mode}</span></div>
+                        <h3 className="text-xs font-medium text-gray-900 whitespace-normal break-words leading-5">{p.query}</h3>
+                        <div className="flex items-center gap-3 mt-1.5 text-[11px] text-gray-400"><span className="flex items-center gap-1"><Clock className="w-3 h-3" />{timeAgo(p.created_at)}</span><span className="flex items-center gap-1 text-emerald-600"><Coins className="w-3 h-3" />{formatUsd(p.total_cost_usd)}</span></div>
                       </div>
-                      <button onClick={handleCreateLlmModel} disabled={creatingLlmModel || !newLlmModelName.trim() || !newLlmProviderUrl.trim()} className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">{creatingLlmModel ? 'Adding...' : 'Add model'}</button>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            navigate(`/project/${p.id}`)
+                          }}
+                          className="p-2 rounded-lg hover:bg-brand-50 text-gray-300 hover:text-brand-600 transition-colors"
+                          aria-label="Open project"
+                          title="Open project"
+                        >
+                          <FolderOpen className="w-4 h-4" />
+                        </button>
+                        <button onClick={(e) => handleDelete(p.id, e)} className="p-2 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                      </div>
                     </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        </aside>
 
-                    <div className="space-y-1">
-                      <div className="text-xs font-medium text-gray-500">Saved Models</div>
-                      {llmModelsLoading ? <div className="text-xs text-gray-400">Loading models...</div> : llmModels.length === 0 ? <div className="text-xs text-gray-400">No saved models yet.</div> : llmModels.map(model => (
-                        <div key={model.id} className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-2.5 py-1.5">
-                          <div className="min-w-0">
-                            <div className="text-xs text-gray-700 truncate flex items-center gap-1.5"><span>{model.type} | {model.model_name}</span>{model.has_api_key && <span className="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-medium text-emerald-700">key saved{model.api_key_preview ? ` (${model.api_key_preview})` : ''}</span>}</div>
-                            <div className="text-[10px] text-gray-400 truncate">{model.provider_url}</div>
-                          </div>
-                          <button onClick={() => handleDeleteLlmModel(model.id)} className="text-[10px] text-red-500 hover:text-red-600 px-2 py-0.5 rounded">Delete</button>
+        <section className="min-w-0 space-y-4">
+          {showNew && (
+            <>
+              <div className="glass-card p-6">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                
+                  <label className="block text-sm font-medium text-gray-700">{mode === 'discovery' ? 'New Research Field or Question' : 'New Research Question'}</label>
+                  <div className="flex items-center gap-2">
+                    <button onClick={handleDownloadConfigYaml} className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50">Download YAML Config</button>
+                    <button onClick={() => configUploadInputRef.current?.click()} className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50">Upload YAML Config</button>
+                    <input ref={configUploadInputRef} type="file" accept=".yaml,.yml,text/yaml,text/x-yaml" className="hidden" onChange={handleUploadConfigYaml} />
+                  </div>
+                </div>
+                <textarea value={query} onChange={(e) => setQuery(e.target.value)} placeholder={mode === 'discovery' ? 'e.g., Single-cell RNA sequencing in tumor microenvironment...' : 'e.g., Analyze the differential expression patterns in this miRNA dataset...'} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-brand-400 focus:ring-2 focus:ring-brand-100 outline-none text-sm resize-y min-h-[130px] transition-all" />
+                <button onClick={handleCreate} disabled={!query.trim() || creating} className={`mt-3 w-full py-3 text-white rounded-xl font-medium text-sm shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 ${mode === 'discovery' ? 'bg-violet-600 hover:bg-violet-700' : 'bg-brand-600 hover:bg-brand-700'}`}>
+                  {creating ? <><Loader2 className="w-4 h-4 animate-spin" />{mode === 'discovery' ? 'Starting discovery...' : 'Starting analysis...'}</> : <>{mode === 'discovery' ? <Compass className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}{mode === 'discovery' ? 'Start Discovery' : 'Start Analysis'}</>}
+                </button>
+              </div>
+
+              <div className="glass-card p-4 space-y-4 animate-slide-up">
+                <div>
+                  <div className="mb-2">
+                    <span className="inline-flex items-center rounded-full bg-brand-100 text-brand-700 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide">Analysis Mode</span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <button onClick={() => setMode('orchestrated')} className={`px-4 py-3 rounded-xl border text-sm font-medium text-left transition-all ${mode === 'orchestrated' ? 'border-brand-400 bg-brand-50 text-brand-700 ring-2 ring-brand-100' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                      <div className="font-semibold">Orchestrated</div><div className="text-xs mt-0.5 opacity-70">Multi-agent with planning & review</div>
+                    </button>
+                    <button onClick={() => setMode('simple')} className={`px-4 py-3 rounded-xl border text-sm font-medium text-left transition-all ${mode === 'simple' ? 'border-brand-400 bg-brand-50 text-brand-700 ring-2 ring-brand-100' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                      <div className="font-semibold">Simple</div><div className="text-xs mt-0.5 opacity-70">Direct coding, faster & cheaper</div>
+                    </button>
+                    <button onClick={() => setMode('discovery')} className={`px-4 py-3 rounded-xl border text-sm font-medium text-left transition-all ${mode === 'discovery' ? 'border-violet-400 bg-violet-50 text-violet-700 ring-2 ring-violet-100' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                      <div className="font-semibold">Discovery</div><div className="text-xs mt-0.5 opacity-70">PubMed literature + novel hypothesis</div>
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-2">
+                    <span className="inline-flex items-center rounded-full bg-sky-100 text-sky-700 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide">Input Files</span>
+                    <span className="text-gray-400 text-xs ml-2">(optional)</span>
+                  </div>
+                  <label className="flex items-center justify-center gap-2 px-4 py-4 rounded-xl border-2 border-dashed border-gray-200 hover:border-brand-300 cursor-pointer transition-colors bg-gray-50/50">
+                    <Upload className="w-4 h-4 text-gray-400" />
+                    <span className="text-sm text-gray-500">{files.length > 0 ? `${files.length} file(s) selected` : 'Click to upload files'}</span>
+                    <input type="file" multiple className="hidden" onChange={(e) => setFiles(Array.from(e.target.files || []))} />
+                  </label>
+                </div>
+
+                {mode === 'discovery' && (
+                  <div className="p-4 rounded-xl bg-violet-50/60 border border-violet-100 space-y-4">
+                    <div className="flex items-center gap-2 text-sm font-medium text-violet-700"><Compass className="w-4 h-4" />Discovery Settings</div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1"><label className="text-sm text-gray-600">Number of papers</label><span className="text-sm font-semibold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-md">{numPapers}</span></div>
+                      <input type="range" min={1} max={20} value={numPapers} onChange={(e) => setNumPapers(Number(e.target.value))} className="w-full h-1.5 rounded-full bg-violet-200 appearance-none cursor-pointer accent-violet-600" />
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1"><label className="text-sm text-gray-600">Look back period</label><span className="text-sm font-semibold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-md">{yearsBack} year{yearsBack === 1 ? '' : 's'}</span></div>
+                      <input type="range" min={1} max={30} value={yearsBack} onChange={(e) => setDaysBack(Number(e.target.value) * 365)} className="w-full h-1.5 rounded-full bg-violet-200 appearance-none cursor-pointer accent-violet-600" />
+                    </div>
+                  </div>
+                )}
+
+                <div className="rounded-xl border border-gray-200 bg-gray-100/80 p-3.5 space-y-2">
+                  <div>
+                    <span className="inline-flex items-center rounded-full bg-emerald-100 text-emerald-700 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide">Interaction</span>
+                  </div>
+                  <label className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2 cursor-pointer">
+                    <span className="text-sm text-gray-700">Human in the loop</span>
+                    <input
+                      type="checkbox"
+                      checked={humanInTheLoop}
+                      onChange={(e) => setHumanInTheLoop(e.target.checked)}
+                      className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-400"
+                    />
+                  </label>
+                  <p className="text-[11px] text-gray-500 leading-relaxed">
+                    <span className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-gray-300 text-gray-600 font-semibold mr-1 align-middle">?</span>
+                    When enabled, the agent can pause and ask clarifying questions if your request is ambiguous. You can answer in the Activity Log to continue.
+                  </p>
+                </div>
+
+                <div className={`rounded-xl border p-3.5 space-y-3 ${modelSettingsNeedsAttention ? 'border-rose-300 bg-rose-50/70' : 'border-gray-200 bg-gray-100/80'}`}>
+                  <div className="flex items-center justify-between gap-2"><div><span className="inline-flex items-center rounded-full bg-indigo-100 text-indigo-700 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide">Model Selection</span></div><span className={`text-[10px] px-2 py-0.5 rounded-full ${modelSettingsNeedsAttention ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'}`}>{modelSettingsNeedsAttention ? 'Select valid model' : 'Role Assignment'}</span></div>
+                  {modelSettingsNeedsAttention && <div className="text-[11px] text-rose-700 bg-rose-100 border border-rose-200 rounded-md px-2 py-1">The selected model was not found. Add it again or choose another saved model before starting analysis.</div>}
+                  <div className="space-y-2">
+                    {mode !== 'simple' && <div><label className="block text-xs font-medium text-gray-500 mb-1">Planning Model</label><select value={planningLlmModelId} onChange={(e) => applySelectedModelToRole('planning', e.target.value ? Number(e.target.value) : '')} className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"><option value="">Select planning model</option>{llmModels.map(model => (<option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>))}</select></div>}
+                    {mode !== 'simple' && <div><label className="block text-xs font-medium text-gray-500 mb-1">Review Model</label><select value={reviewLlmModelId} onChange={(e) => applySelectedModelToRole('review', e.target.value ? Number(e.target.value) : '')} className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"><option value="">Select review model</option>{llmModels.map(model => (<option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>))}</select></div>}
+                    {mode !== 'discovery' && <div><label className="block text-xs font-medium text-gray-500 mb-1">Coding Model</label><select value={codingLlmModelId} onChange={(e) => applySelectedModelToRole('coding', e.target.value ? Number(e.target.value) : '')} className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"><option value="">Select coding model</option>{llmModels.map(model => (<option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>))}</select><p className="text-[10px] text-gray-400 mt-1">If no saved coding model is selected, default is <span className="font-medium text-gray-500">claude-sonnet-4-5</span>.</p></div>}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-gray-200 bg-gray-100/80 p-3.5 space-y-3">
+                  <div className="flex items-center justify-between gap-2"><div><span className="inline-flex items-center rounded-full bg-amber-100 text-amber-700 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide">Cost Limit</span></div><span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Budget Guardrail</span></div>
+                  <div><label className="block text-xs font-medium text-gray-500 mb-1">Max Cost (USD) <span className="text-gray-300">(optional stop limit)</span></label><input type="number" min="0" step="0.01" value={maxCostUsd} onChange={e => { const value = e.target.value; setMaxCostUsd(value === '' ? '' : Math.max(0, Number(value))) }} placeholder="e.g. 2.50" className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white focus:border-brand-400 focus:ring-1 focus:ring-brand-100 outline-none" /></div>
+                </div>
+
+                <div className={`rounded-xl border p-3.5 space-y-3 ${modelSettingsNeedsAttention ? 'border-rose-300 bg-rose-50/70' : 'border-gray-200 bg-gray-100/80'}`}>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center rounded-full bg-fuchsia-100 text-fuchsia-700 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide">Model Registry</span>
+                  </div>
+                  <div className="text-[11px] text-gray-500">Models are stored in SQLite with type, model name, provider URL, and an optional provider API key that stays on the backend.</div>
+                  <div className="rounded-lg border bg-white p-3 space-y-2">
+                    <div><span className="inline-flex items-center rounded-full bg-violet-100 text-violet-700 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide">Add LLM Model</span></div>
+                    <div className="flex flex-col gap-2">
+                      <select value={newLlmType} onChange={(e) => { setModelSettingsNeedsAttention(false); setNewLlmType(e.target.value as LlmModelType) }} className="px-2.5 py-2 rounded-lg border border-gray-200 text-sm bg-white"><option value="openai">openai</option><option value="anthropic">anthropic</option><option value="local">local</option><option value="azure-openai">azure-openai</option><option value="azure-anthropic">azure-anthropic</option></select>
+                      <input value={newLlmProviderUrl} onChange={(e) => { setModelSettingsNeedsAttention(false); setNewLlmProviderUrl(e.target.value) }} placeholder="provider_url" className="px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                      <input value={newLlmModelName} onChange={(e) => { setModelSettingsNeedsAttention(false); setNewLlmModelName(e.target.value) }} placeholder="model_name" className="px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                      <input type="password" value={newLlmApiKey} onChange={(e) => { setModelSettingsNeedsAttention(false); setNewLlmApiKey(e.target.value) }} placeholder="provider_api_key (optional)" className="px-3 py-2 rounded-lg border border-gray-200 text-sm" />
+                    </div>
+                    <button onClick={handleCreateLlmModel} disabled={creatingLlmModel || !newLlmModelName.trim() || !newLlmProviderUrl.trim()} className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">{creatingLlmModel ? 'Adding...' : 'Add model'}</button>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="text-xs font-medium text-gray-500">Saved Models</div>
+                    {llmModelsLoading ? <div className="text-xs text-gray-400">Loading models...</div> : llmModels.length === 0 ? <div className="text-xs text-gray-400">No saved models yet.</div> : llmModels.map(model => (
+                      <div key={model.id} className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-2.5 py-1.5">
+                        <div className="min-w-0">
+                          <div className="text-xs text-gray-700 truncate flex items-center gap-1.5"><span>{model.type} | {model.model_name}</span>{model.has_api_key && <span className="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-medium text-emerald-700">key saved{model.api_key_preview ? ` (${model.api_key_preview})` : ''}</span>}</div>
+                          <div className="text-[10px] text-gray-400 truncate">{model.provider_url}</div>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  
-
-                  
-                </div>
-        )}
-         <div className="glass-card p-3 space-y-2">
-          <div className="flex items-center justify-between px-1">
-            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Previous Projects</div>
-            <div className="text-[10px] text-gray-400">{projects.length}</div>
-          </div>
-          {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-6 h-6 text-brand-500 animate-spin" />
-            </div>
-          ) : projects.length === 0 ? (
-            <div className="text-center py-6 px-4">
-              <Search className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-              <h3 className="text-sm font-medium text-gray-600">No projects yet</h3>
-            </div>
-          ) : (
-            projects.map((p) => {
-              const isSelected = p.id === selectedProjectId
-              return (
-                <div key={p.id} onClick={() => setSelectedProjectId(p.id)} className={`glass-card-hover px-3 py-2.5 cursor-pointer border ${isSelected ? 'border-brand-300 bg-brand-50/50' : 'border-transparent'}`}>
-                  <div className="flex items-start gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1"><StatusBadge status={p.status} /><span className="text-xs text-gray-400 capitalize px-2 py-0.5 bg-gray-100 rounded-md">{p.mode}</span></div>
-                      <h3 className="text-xs font-medium text-gray-900 whitespace-normal break-words leading-5">{p.query}</h3>
-                      <div className="flex items-center gap-3 mt-1.5 text-[11px] text-gray-400"><span className="flex items-center gap-1"><Clock className="w-3 h-3" />{timeAgo(p.created_at)}</span><span className="flex items-center gap-1 text-emerald-600"><Coins className="w-3 h-3" />{formatUsd(p.total_cost_usd)}</span></div>
-                    </div>
-                    <button onClick={(e) => handleDelete(p.id, e)} className="p-2 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors flex-shrink-0"><Trash2 className="w-4 h-4" /></button>
+                        <button onClick={() => handleDeleteLlmModel(model.id)} className="text-[10px] text-red-500 hover:text-red-600 px-2 py-0.5 rounded">Delete</button>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              )
-            })
+              </div>
+            </>
           )}
-        </div>
-      </aside>
 
-      <section className="min-w-0 space-y-4">
-        <div className="glass-card p-6">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <label className="block text-sm font-medium text-gray-700">{mode === 'discovery' ? 'Research Field or Question' : 'Research Question'}</label>
-            <div className="flex items-center gap-2">
-              <button onClick={handleDownloadConfigYaml} className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50">Download YAML Config</button>
-              <button onClick={() => configUploadInputRef.current?.click()} className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50">Upload YAML Config</button>
-              <input ref={configUploadInputRef} type="file" accept=".yaml,.yml,text/yaml,text/x-yaml" className="hidden" onChange={handleUploadConfigYaml} />
-            </div>
-          </div>
-          <textarea value={query} onChange={(e) => setQuery(e.target.value)} placeholder={mode === 'discovery' ? 'e.g., Single-cell RNA sequencing in tumor microenvironment...' : 'e.g., Analyze the differential expression patterns in this miRNA dataset...'} className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-brand-400 focus:ring-2 focus:ring-brand-100 outline-none text-sm resize-y min-h-[130px] transition-all" />
-          <button onClick={handleCreate} disabled={!query.trim() || creating} className={`mt-3 w-full py-3 text-white rounded-xl font-medium text-sm shadow-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 ${mode === 'discovery' ? 'bg-violet-600 hover:bg-violet-700' : 'bg-brand-600 hover:bg-brand-700'}`}>
-            {creating ? <><Loader2 className="w-4 h-4 animate-spin" />{mode === 'discovery' ? 'Starting discovery...' : 'Starting analysis...'}</> : <>{mode === 'discovery' ? <Compass className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}{mode === 'discovery' ? 'Start Discovery' : 'Start Analysis'}</>}
-          </button>
-        </div>
+          {!showNew && !selectedProject ? (
+            <div className="glass-card p-4 text-sm text-gray-500">Select a project from the left sidebar to view its details here in the main panel.</div>
+          ) : null}
 
-        <div className="glass-card p-6">
-          <h2 className="text-xl font-semibold text-gray-900">Session Workspace</h2>
-          <p className="text-sm text-gray-500 mt-1">Use the left sidebar for new sessions and previous projects. Project metrics and details are on the right.</p>
-        </div>
-      </section>
+          {!showNew && selectedProject ? (
+            <div className="glass-card p-4 space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-bold tracking-tight text-gray-900">Project Details</h2>
+                  <p className="text-xs text-gray-500 mt-1">Selected project summary</p>
+                </div>
+                <button onClick={() => navigate(`/project/${selectedProject.id}`)} className="px-3 py-2 rounded-lg bg-brand-600 text-white text-xs font-medium hover:bg-brand-700 transition-colors">Open</button>
+              </div>
 
-      <aside className="sticky top-0 self-start h-screen overflow-y-auto pl-1 space-y-4">
-        <div className="glass-card p-4 flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-bold tracking-tight text-gray-900">Project Details</h2>
-            <p className="text-xs text-gray-500 mt-1">Selected project summary</p>
-          </div>
-          {selectedProject && <button onClick={() => navigate(`/project/${selectedProject.id}`)} className="px-3 py-2 rounded-lg bg-brand-600 text-white text-xs font-medium hover:bg-brand-700 transition-colors">Open</button>}
-        </div>
-
-        <div className="glass-card p-4 space-y-3">
-          <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Project Summary</div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-              <div className="text-[10px] uppercase tracking-wide text-gray-500">Total</div>
-              <div className="text-lg font-semibold text-gray-900 mt-1">{projects.length}</div>
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-              <div className="text-[10px] uppercase tracking-wide text-gray-500">Active</div>
-              <div className="text-lg font-semibold text-blue-700 mt-1">{activeProjects}</div>
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-              <div className="text-[10px] uppercase tracking-wide text-gray-500">Completed</div>
-              <div className="text-lg font-semibold text-emerald-700 mt-1">{completedProjects}</div>
-            </div>
-            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-              <div className="text-[10px] uppercase tracking-wide text-gray-500">Spend</div>
-              <div className="text-lg font-semibold text-emerald-700 mt-1">{formatUsd(totalProjectCost)}</div>
-            </div>
-          </div>
-        </div>
-
-        {!selectedProject ? (
-          <div className="glass-card p-4 text-sm text-gray-500">Select a project from the left sidebar to view its details here.</div>
-        ) : (
-          <div className="glass-card p-4 space-y-4">
-            <div>
-              <div className="flex items-center gap-2 mb-2"><StatusBadge status={selectedProject.status} /><span className="text-xs text-gray-400 capitalize px-2 py-0.5 bg-gray-100 rounded-md">{selectedProject.mode}</span></div>
-              <h3 className="text-sm font-semibold text-gray-900 leading-5 break-words">{selectedProject.query}</h3>
-              <p className="text-xs text-gray-400 mt-2 break-all">ID: {selectedProject.id}</p>
-            </div>
-
-            <div className="grid grid-cols-1 gap-3">
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-3"><div className="text-[10px] uppercase tracking-wide text-gray-500">Created</div><div className="text-sm font-medium text-gray-900 mt-1">{timeAgo(selectedProject.created_at)}</div></div>
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-3"><div className="text-[10px] uppercase tracking-wide text-gray-500">Files</div><div className="text-sm font-medium text-gray-900 mt-1">{selectedProject.files_count}</div></div>
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-3"><div className="text-[10px] uppercase tracking-wide text-gray-500">Spend</div><div className="text-sm font-medium text-emerald-700 mt-1">{formatUsd(selectedProject.total_cost_usd)}</div></div>
-            </div>
-
-            <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
               <div>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-[10px] uppercase tracking-wide text-gray-500">Project Progress</div>
-                  <div className="text-xs font-medium text-gray-700">
-                    {selectedProject.stages_completed}/{selectedProject.stages_total} steps
+                <div className="flex items-center gap-2 mb-2"><StatusBadge status={selectedProject.status} /><span className="text-xs text-gray-400 capitalize px-2 py-0.5 bg-gray-100 rounded-md">{selectedProject.mode}</span></div>
+                <h3 className="text-sm font-semibold text-gray-900 leading-5 break-words">{selectedProject.query}</h3>
+                <p className="text-xs text-gray-400 mt-2 break-all">ID: {selectedProject.id}</p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3">
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3"><div className="text-[10px] uppercase tracking-wide text-gray-500">Created</div><div className="text-sm font-medium text-gray-900 mt-1">{timeAgo(selectedProject.created_at)}</div></div>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3"><div className="text-[10px] uppercase tracking-wide text-gray-500">Files</div><div className="text-sm font-medium text-gray-900 mt-1">{selectedProject.files_count}</div></div>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3"><div className="text-[10px] uppercase tracking-wide text-gray-500">Spend</div><div className="text-sm font-medium text-emerald-700 mt-1">{formatUsd(selectedProject.total_cost_usd)}</div></div>
+              </div>
+
+              <div className="rounded-xl border border-gray-200 bg-white p-3 space-y-3">
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[10px] uppercase tracking-wide text-gray-500">Project Progress</div>
+                    <div className="text-xs font-medium text-gray-700">
+                      {selectedProject.stages_completed}/{selectedProject.stages_total} steps
+                    </div>
+                  </div>
+                  <div className="mt-2 h-2 rounded-full bg-gray-100 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-brand-600 transition-all"
+                      style={{ width: `${selectedProject.stages_total > 0 ? Math.min(100, Math.round((selectedProject.stages_completed / selectedProject.stages_total) * 100)) : 0}%` }}
+                    />
                   </div>
                 </div>
-                <div className="mt-2 h-2 rounded-full bg-gray-100 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-brand-600 transition-all"
-                    style={{ width: `${selectedProject.stages_total > 0 ? Math.min(100, Math.round((selectedProject.stages_completed / selectedProject.stages_total) * 100)) : 0}%` }}
-                  />
+                {selectedProject.discovery_phase && <div className="text-xs text-gray-500">Current phase: {selectedProject.discovery_phase}</div>}
+                <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
+                  <div className="rounded-lg bg-gray-50 px-3 py-2">
+                    <div className="text-[10px] uppercase tracking-wide text-gray-500">Stages Total</div>
+                    <div className="mt-1 font-semibold text-gray-900">{selectedProject.stages_total}</div>
+                  </div>
+                  <div className="rounded-lg bg-gray-50 px-3 py-2">
+                    <div className="text-[10px] uppercase tracking-wide text-gray-500">Completed</div>
+                    <div className="mt-1 font-semibold text-gray-900">{selectedProject.stages_completed}</div>
+                  </div>
                 </div>
               </div>
-              {selectedProject.discovery_phase && <div className="text-xs text-gray-500">Current phase: {selectedProject.discovery_phase}</div>}
-              <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
-                <div className="rounded-lg bg-gray-50 px-3 py-2">
-                  <div className="text-[10px] uppercase tracking-wide text-gray-500">Stages Total</div>
-                  <div className="mt-1 font-semibold text-gray-900">{selectedProject.stages_total}</div>
-                </div>
-                <div className="rounded-lg bg-gray-50 px-3 py-2">
-                  <div className="text-[10px] uppercase tracking-wide text-gray-500">Completed</div>
-                  <div className="mt-1 font-semibold text-gray-900">{selectedProject.stages_completed}</div>
-                </div>
-              </div>
-            </div>
 
-            {selectedProject.max_cost_usd && selectedProject.max_cost_usd > 0 && (
-              <div className="rounded-xl border border-amber-100 bg-amber-50 p-3"><div className="text-[10px] uppercase tracking-wide text-amber-700">Cost Limit</div><div className="text-sm font-medium text-amber-800 mt-1">{formatUsd(selectedProject.max_cost_usd)}</div></div>
-            )}
+              {selectedProject.max_cost_usd && selectedProject.max_cost_usd > 0 && (
+                <div className="rounded-xl border border-amber-100 bg-amber-50 p-3"><div className="text-[10px] uppercase tracking-wide text-amber-700">Cost Limit</div><div className="text-sm font-medium text-amber-800 mt-1">{formatUsd(selectedProject.max_cost_usd)}</div></div>
+              )}
 
-            {selectedProject.llm_config && (
-              <div className="space-y-2">
-                <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Model Config</div>
+              {selectedProject.llm_config && (
                 <div className="space-y-2">
-                  {selectedProject.llm_config.planning_model && <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700"><div className="font-semibold text-gray-500 uppercase tracking-wide text-[10px]">Planning</div><div className="mt-1 break-all">{selectedProject.llm_config.planning_model}</div></div>}
-                  {selectedProject.llm_config.review_model && <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700"><div className="font-semibold text-gray-500 uppercase tracking-wide text-[10px]">Review</div><div className="mt-1 break-all">{selectedProject.llm_config.review_model}</div></div>}
-                  {selectedProject.llm_config.coding_model && <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700"><div className="font-semibold text-gray-500 uppercase tracking-wide text-[10px]">Coding</div><div className="mt-1 break-all">{selectedProject.llm_config.coding_model}</div></div>}
+                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Model Config</div>
+                  <div className="space-y-2">
+                    {selectedProject.llm_config.planning_model && <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700"><div className="font-semibold text-gray-500 uppercase tracking-wide text-[10px]">Planning</div><div className="mt-1 break-all">{selectedProject.llm_config.planning_model}</div></div>}
+                    {selectedProject.llm_config.review_model && <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700"><div className="font-semibold text-gray-500 uppercase tracking-wide text-[10px]">Review</div><div className="mt-1 break-all">{selectedProject.llm_config.review_model}</div></div>}
+                    {selectedProject.llm_config.coding_model && <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700"><div className="font-semibold text-gray-500 uppercase tracking-wide text-[10px]">Coding</div><div className="mt-1 break-all">{selectedProject.llm_config.coding_model}</div></div>}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-        )}
-      </aside>
+              )}
+            </div>
+          ) : null}
+        </section>
+      </div>
     </div>
   )
 }
