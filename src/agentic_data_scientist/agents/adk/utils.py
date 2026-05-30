@@ -27,6 +27,36 @@ logger = logging.getLogger(__name__)
 _LITELLM_DEBUG_ENABLED = False
 
 
+def _normalize_api_base(url: Optional[str]) -> Optional[str]:
+    """Normalize API base by trimming whitespace and trailing slashes."""
+    if not url:
+        return None
+    normalized = str(url).strip()
+    if not normalized:
+        return None
+    return normalized.rstrip("/")
+
+
+def _ensure_azure_anthropic_api_base(url: Optional[str]) -> Optional[str]:
+    """Ensure Azure Anthropic base targets the /anthropic root (not /v1/messages).
+
+    LiteLLM Anthropic transport appends /v1/messages itself.
+    """
+    base = _normalize_api_base(url)
+    if not base:
+        return None
+
+    lower = base.lower()
+    if lower.endswith("/v1/messages"):
+        base = base[: -len("/v1/messages")]
+        lower = base.lower()
+
+    if "/anthropic" not in lower:
+        base = f"{base}/anthropic"
+
+    return _normalize_api_base(base)
+
+
 def _is_truthy(value: Optional[str]) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -242,9 +272,13 @@ if AZURE_ANTHROPIC_API_KEY:
 else:
     os.environ["AZURE_ANTHROPIC_API_KEY"] = AZURE_API_KEY
 if AZURE_ANTHROPIC_URL:
-    os.environ["AZURE_ANTHROPIC_API_BASE"] = AZURE_ANTHROPIC_URL
-else: 
-    os.environ["AZURE_ANTHROPIC_API_BASE"] = AZURE_API_BASE + "/anthropic/v1/messages"  # Fallback to shared URL if specific one not set
+    normalized_azure_anthropic_base = _ensure_azure_anthropic_api_base(AZURE_ANTHROPIC_URL)
+    if normalized_azure_anthropic_base:
+        os.environ["AZURE_ANTHROPIC_API_BASE"] = normalized_azure_anthropic_base
+elif AZURE_API_BASE:
+    normalized_azure_anthropic_base = _ensure_azure_anthropic_api_base(AZURE_API_BASE)
+    if normalized_azure_anthropic_base:
+        os.environ["AZURE_ANTHROPIC_API_BASE"] = normalized_azure_anthropic_base
 
 _maybe_enable_litellm_debug()
 
@@ -444,7 +478,13 @@ def _resolve_provider_defaults(provider: str) -> tuple[Optional[str], Optional[s
         )
     if provider == "azure-anthropic":
         return (
-            os.getenv("AZURE_ANTHROPIC_URL") or AZURE_ANTHROPIC_URL,
+            _ensure_azure_anthropic_api_base(
+                os.getenv("AZURE_ANTHROPIC_API_BASE")
+                or os.getenv("AZURE_ANTHROPIC_URL")
+                or AZURE_ANTHROPIC_URL
+                or os.getenv("AZURE_API_BASE")
+                or AZURE_API_BASE
+            ),
             os.getenv("AZURE_ANTHROPIC_API_KEY") or AZURE_ANTHROPIC_API_KEY,
         )
     return (None, None)
@@ -455,14 +495,14 @@ def _infer_litellm_path(provider: str, model_name: str) -> str:
     provider = (provider or "").lower()
     if provider in {"openai", "openrouter", "local"}:
         return "/chat/completions"
-    if provider == "anthropic":
+    elif provider == "anthropic":
         return "/v1/messages"
-    if provider == "bedrock":
+    elif provider == "bedrock":
         return f"/model/{model_name}/converse (AWS Bedrock runtime)"
-    if provider == "azure-openai":
+    elif provider == "azure-openai":
         return "/openai/deployments/{model_name}/chat/completions (Azure OpenAI)"
-    if provider == "azure-anthropic":
-        return "/v1/messages (Azure Anthropic)"
+    elif provider == "azure-anthropic":
+        return "/anthropic/v1/messages (Azure Anthropic)"
     return "provider-specific (resolved by LiteLLM)"
 
 
@@ -623,6 +663,7 @@ def create_litellm_model(model_name: str, num_retries: int = 2, timeout: int = 3
         print(kwargs)
         return LiteLlm(**kwargs)
     elif provider == "azure-anthropic":
+        effective_api_base = _ensure_azure_anthropic_api_base(effective_api_base)
         _log_litellm_target(provider, model_name, effective_api_base)
         kwargs = {
             "model": model_name,
@@ -811,8 +852,8 @@ def get_generate_content_config(
             function_calling_config=types.FunctionCallingConfig(mode=types.FunctionCallingConfigMode.NONE),
         )
 
-    # Bedrock and Anthropic models can reject temperature+top_p together
-    if provider not in ("bedrock", "anthropic"):
+    # Bedrock and Anthropic-routed providers can reject temperature+top_p together.
+    if provider not in ("bedrock", "anthropic", "azure-anthropic"):
         config_kwargs["top_p"] = 0.95
         config_kwargs["seed"] = 42
     return types.GenerateContentConfig(**config_kwargs)
