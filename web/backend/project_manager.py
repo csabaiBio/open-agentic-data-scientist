@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from dotenv import load_dotenv
-from agentic_data_scientist.core.checkpoint import ReadmeCheckpointStore
+
 
 load_dotenv(override=True)
 
@@ -510,65 +510,7 @@ class ProjectManager:
                 metadata={"phase": "resume_bootstrap", "warning": True},
             ))
 
-    def _emit_resume_checkpoint_summary(self, project_id: str) -> None:
-        """Read project checkpoint state from checkpoint.json and emit resume event with findings and files."""
-        working_dir = self._get_project_working_dir(project_id)
-        readme_path = working_dir / "README.md"
 
-        try:
-            checkpoint_store = ReadmeCheckpointStore(readme_path=readme_path)
-            checkpoint_state = checkpoint_store.load_resume_state()
-            latest_summary = checkpoint_state.get("latest_summary")
-
-            if not latest_summary:
-                self._emit_event(project_id, ProjectEvent(
-                    type="status",
-                    content="No prior checkpoint summary found in output/checkpoint.json.",
-                    author="system",
-                    timestamp=_now(),
-                    metadata={"phase": "resume", "checkpoint_summary_found": False},
-                ))
-                return
-
-            summary_text = str(latest_summary.get("summary") or "").strip() or "[empty summary]"
-            summary_timestamp = str(latest_summary.get("timestamp") or "")
-            pending_events = len(checkpoint_state.get("events_after_summary") or [])
-            findings = latest_summary.get("findings") or []
-            files = latest_summary.get("files") or []
-
-            suffix = ""
-            if pending_events:
-                suffix = f" ({pending_events} event(s) after that summary)"
-
-            metadata = {
-                "phase": "resume",
-                "checkpoint_summary_found": True,
-                "checkpoint_summary": summary_text,
-                "checkpoint_summary_timestamp": summary_timestamp,
-                "checkpoint_events_after_summary": pending_events,
-                "checkpoint_findings": findings[:5],  # Include top 5 findings
-                "checkpoint_files": files,  # Include file list
-            }
-
-            self._emit_event(project_id, ProjectEvent(
-                type="status",
-                content=(
-                    "Loaded checkpoint summary from output/checkpoint.json: "
-                    f"{summary_text}{suffix}"
-                ),
-                author="system",
-                timestamp=_now(),
-                metadata=metadata,
-            ))
-        except Exception as exc:
-            logger.warning("Failed to read resume checkpoint summary for %s: %s", project_id, exc)
-            self._emit_event(project_id, ProjectEvent(
-                type="status",
-                content=f"Checkpoint summary read warning: {exc}",
-                author="system",
-                timestamp=_now(),
-                metadata={"phase": "resume", "checkpoint_warning": True},
-            ))
 
     async def resume_project(self, project_id: str) -> bool:
         """Resume a stopped or failed project, re-running the analysis from scratch
@@ -627,9 +569,7 @@ class ProjectManager:
     def _build_resume_prompt(self, project: "Project", working_dir: Path) -> str:
         """Build a context-rich prompt for the RESUME workflow.
 
-        Reads the checkpoint.json (if it exists) for prior summaries/findings,
-        lists all files in the working directory, and wraps everything with the
-        original query so the agent can continue intelligently.
+        Uses project data (events and files) to provide prior progress context.
         """
         original_query = project.analysis_query or project.query
         original_mode = (project.original_mode or ProjectMode.ORCHESTRATED).value
@@ -650,55 +590,31 @@ class ProjectManager:
             "",
         ]
 
-        # ── Checkpoint summary ────────────────────────────────────
-        readme_path = working_dir / "README.md"
-        try:
-            checkpoint_store = ReadmeCheckpointStore(readme_path=readme_path)
-            checkpoint_state = checkpoint_store.load_resume_state()
-            latest_summary = checkpoint_state.get("latest_summary")
+        # ── Recent events and progress ────────────────────────────
+        if project.events:
+            lines += [
+                "## Prior Progress",
+                "",
+                f"*Project created: {project.created_at}*",
+                "",
+                "### Recent Events",
+                "",
+            ]
+            # Show last 20 events
+            for ev in project.events[-20:]:
+                ev_type = ev.type
+                content = str(ev.content or "").strip()
+                if content and ev_type not in ("thought",):  # Skip verbose thought-type events
+                    lines.append(f"- [{ev_type}] {content[:100]}")
+            lines.append("")
 
-            if latest_summary:
-                summary_text = str(latest_summary.get("summary") or "").strip()
-                summary_ts = str(latest_summary.get("timestamp") or "")
-                findings = latest_summary.get("findings") or []
-                files_list = latest_summary.get("files") or []
-                events_after = checkpoint_state.get("events_after_summary") or []
-
-                lines += [
-                    "## Prior Progress (from checkpoint)",
-                    "",
-                    f"*Last saved: {summary_ts}*",
-                    "",
-                    summary_text,
-                    "",
-                ]
-                if findings:
-                    lines += ["### Key Findings So Far", ""]
-                    for f in findings:
-                        lines.append(f"- {f}")
-                    lines.append("")
-
-                if files_list:
-                    lines += ["### Files Recorded in Checkpoint", ""]
-                    for fentry in files_list:
-                        path = fentry.get("path", "")
-                        purpose = fentry.get("purpose", "")
-                        lines.append(f"- `{path}`" + (f" — {purpose}" if purpose else ""))
-                    lines.append("")
-
-                if events_after:
-                    lines += [
-                        f"### Events After Last Checkpoint ({len(events_after)} event(s))",
-                        "",
-                    ]
-                    for ev in events_after[-10:]:  # last 10 events
-                        ev_type = ev.get("event_type", "")
-                        ev_msg = str(ev.get("message", "")).strip()
-                        if ev_msg:
-                            lines.append(f"- [{ev_type}] {ev_msg}")
-                    lines.append("")
-        except Exception:
-            pass
+        # ── Generated files ────────────────────────────────────────
+        if project.files:
+            lines += ["### Generated Files So Far", ""]
+            for f in project.files:
+                purpose = f"({f.type})" if f.type != "unknown" else ""
+                lines.append(f"- `{f.name}` {purpose}")
+            lines.append("")
 
         # ── Existing files in working dir ─────────────────────────
         try:
@@ -723,7 +639,7 @@ class ProjectManager:
         lines += [
             "## Instructions",
             "",
-            "1. Review the existing files and any checkpoint summary above.",
+            "1. Review the existing files and prior progress above.",
             "2. Determine what has already been completed and what remains.",
             "3. Continue the analysis from where it left off — do not redo completed work.",
             "4. Produce any remaining outputs (figures, reports, statistics, etc.) required by the original task.",
@@ -767,8 +683,8 @@ class ProjectManager:
     async def _run_resume(self, project_id: str, uploaded_files: List[tuple]):
         """Execute the RESUME workflow.
 
-        Builds a rich context prompt from the checkpoint state and previously
-        generated files, then runs the coding agent to continue the analysis.
+        Builds a context prompt from prior progress and generated files,
+        then runs the coding agent to continue the analysis.
         After the agent finishes the project mode is restored to original_mode.
         """
         project = self._projects.get(project_id)
