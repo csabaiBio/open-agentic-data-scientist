@@ -177,6 +177,9 @@ class ProjectManager:
         self._event_queues: Dict[str, List[asyncio.Queue]] = {}
         # project_id -> {question_id -> Future[str]}
         self._pending_questions: Dict[str, Dict[str, asyncio.Future]] = {}
+        # Projects loaded with only summary-level fields (events/paper skipped).
+        # Fully populated on first get_project() call.
+        self._lazy_projects: set = set()
         self._load_existing_projects()
 
     def _build_runtime_model_config(self, project: Project) -> Optional[Dict[str, Any]]:
@@ -201,54 +204,19 @@ class ProjectManager:
         for meta_file in self.projects_dir.glob("*/project.json"):
             try:
                 data = json.loads(meta_file.read_text(encoding="utf-8"))
+                # Strip the heavy fields — they are loaded lazily on first access.
+                data.pop("events", None)
+                data.pop("paper_content", None)
+                data.pop("in_silico_suggestions", None)
+                data.pop("experimental_suggestions", None)
                 project = Project(**data)
                 # Mark previously running projects as failed
                 if project.status == ProjectStatus.RUNNING:
                     project.status = ProjectStatus.FAILED
                     project.error = "Server restarted while project was running"
 
-                # Hydrate persisted content from files if not already in model
-                working_dir = Path(project.working_dir) if project.working_dir else None
-                if working_dir and working_dir.exists():
-                    if not project.paper_content:
-                        paper_md = working_dir / "paper.md"
-                        if paper_md.exists():
-                            try:
-                                project.paper_content = paper_md.read_text(encoding="utf-8")
-                            except Exception:
-                                pass
-                    if not project.in_silico_suggestions:
-                        isc = working_dir / "in_silico_data_suggestions.md"
-                        if isc.exists():
-                            try:
-                                project.in_silico_suggestions = isc.read_text(encoding="utf-8")
-                            except Exception:
-                                pass
-                    if not project.experimental_suggestions:
-                        exp = working_dir / "experimental_data_suggestions.md"
-                        if exp.exists():
-                            try:
-                                project.experimental_suggestions = exp.read_text(encoding="utf-8")
-                            except Exception:
-                                pass
-
-                # Backfill stages from events/filesystem for older projects
-                self._backfill_stages(project)
-                if project.stages:
-                    self._save_project(project)
-
-                # Backfill skills_used from events for older projects
-                if not project.skills_used and project.events:
-                    seen = set()
-                    for ev in project.events:
-                        if ev.type == "tool_call" and ev.content:
-                            seen.add(ev.content)
-                        elif ev.type in ("message", "thought") and ev.author and ev.author != "system":
-                            seen.add(ev.author)
-                    if seen:
-                        project.skills_used = sorted(seen)
-
                 self._projects[project.id] = project
+                self._lazy_projects.add(project.id)
             except Exception as e:
                 logger.warning(f"Failed to load project from {meta_file}: {e}")
 
@@ -265,6 +233,68 @@ class ProjectManager:
         save_data.pop("in_silico_suggestions", None)
         save_data.pop("experimental_suggestions", None)
         meta_file.write_text(json.dumps(save_data, indent=2, default=str), encoding="utf-8")
+
+    def _fully_load_project(self, project: Project) -> None:
+        """Populate a lazy project stub with its full data from disk.
+
+        Reads the complete project.json (including events and files), hydrates
+        large text files (paper, suggestions), and runs any pending stage backfill.
+        Called once on the first get_project() access.
+        """
+        meta_file = self.projects_dir / project.id / "project.json"
+        try:
+            data = json.loads(meta_file.read_text(encoding="utf-8"))
+            # Merge only the fields that were stripped at startup; avoid overwriting
+            # in-memory mutations (e.g. status set to FAILED on restart).
+            project.events = [ProjectEvent(**e) for e in (data.get("events") or [])]
+            if not project.files:
+                from .models import GeneratedFile as _GF
+                project.files = [_GF(**f) for f in (data.get("files") or [])]
+        except Exception as exc:
+            logger.warning("_fully_load_project: could not re-read %s: %s", meta_file, exc)
+
+        # Hydrate large text content from separate files
+        working_dir = Path(project.working_dir) if project.working_dir else None
+        if working_dir and working_dir.exists():
+            if not project.paper_content:
+                paper_md = working_dir / "paper.md"
+                if paper_md.exists():
+                    try:
+                        project.paper_content = paper_md.read_text(encoding="utf-8")
+                    except Exception:
+                        pass
+            if not project.in_silico_suggestions:
+                isc = working_dir / "in_silico_data_suggestions.md"
+                if isc.exists():
+                    try:
+                        project.in_silico_suggestions = isc.read_text(encoding="utf-8")
+                    except Exception:
+                        pass
+            if not project.experimental_suggestions:
+                exp = working_dir / "experimental_data_suggestions.md"
+                if exp.exists():
+                    try:
+                        project.experimental_suggestions = exp.read_text(encoding="utf-8")
+                    except Exception:
+                        pass
+
+        # Backfill stages from events/filesystem for older projects
+        if not project.stages:
+            self._backfill_stages(project)
+            if project.stages:
+                self._save_project(project)
+
+        # Backfill skills_used from events for older projects
+        if not project.skills_used and project.events:
+            seen = set()
+            for ev in project.events:
+                if ev.type == "tool_call" and ev.content:
+                    seen.add(ev.content)
+                elif ev.type in ("message", "thought") and ev.author and ev.author != "system":
+                    seen.add(ev.author)
+            if seen:
+                project.skills_used = sorted(seen)
+                self._save_project(project)
 
     def _get_project_working_dir(self, project_id: str) -> Path:
         return self.projects_dir / project_id / "output"
@@ -297,6 +327,12 @@ class ProjectManager:
         project = self._projects.get(project_id)
         if not project:
             return None
+
+        # Fully load the project on first access (lazy-loaded projects only have
+        # summary fields; events, files, paper content and stage backfill are deferred).
+        if project_id in self._lazy_projects:
+            self._fully_load_project(project)
+            self._lazy_projects.discard(project_id)
 
         # Keep artifact list fresh during active runs so UI tabs (files/figures)
         # reflect newly generated outputs without requiring page re-entry.
@@ -1639,6 +1675,7 @@ class ProjectManager:
         # Use project-specific model/provider when available
         from agentic_data_scientist.agents.adk.utils import (
             DEFAULT_MODEL_NAME,
+            _model_supports_temperature,
             create_litellm_model,
             create_litellm_model_from_config,
         )
@@ -1715,7 +1752,9 @@ This is the core section. Present findings with integrated figure references.
         try:
             from google.adk.models.llm_request import LlmRequest
             from google.genai import types as genai_types
-            config_kwargs = {"temperature": 0.3, "max_output_tokens": 6000}
+            config_kwargs = {"max_output_tokens": 6000}
+            if _model_supports_temperature(llm_model_name):
+                config_kwargs["temperature"] = 0.3
             if (provider_for_config or "").lower() != "bedrock":
                 config_kwargs["top_p"] = 0.95
 
@@ -1892,24 +1931,9 @@ For each: **What** (1 line), **Why** (reference a specific result/limitation fro
 - Validation assays targeting the top findings (cite specific genes, miRNAs, proteins, or pathways from results)
 - Perturbation experiments (knockdown, knockout, drug treatment) for the most significant hits
 - Orthogonal methods that would confirm key computational predictions
-For each: **What** (1 line), **Why** (reference a specific result from the paper), **Protocol** (key steps, reagents, controls, expected outcome). If relevant PubMed papers are provided, cite them as methodological references."""
+For each: **What** (1 line), **Why** (reference a specific result from the paper), **Protocol** (key steps, reagents, controls, expected outcome). If relevant PubMed papers are provided, cite them as methodological references.
 
-        from agentic_data_scientist.agents.adk.utils import (
-            DEFAULT_MODEL_NAME,
-            create_litellm_model,
-            create_litellm_model_from_config,
-        )
-        if project.llm_config:
-            model_config = self._build_runtime_model_config(project)
-            llm = create_litellm_model_from_config(model_config, role="planning", num_retries=3, timeout=120)
-            llm_model_name = model_config.get("planning_model") or DEFAULT_MODEL_NAME
-            provider_for_config = model_config.get("planning_provider")
-        else:
-            llm = create_litellm_model(DEFAULT_MODEL_NAME, num_retries=3, timeout=120)
-            llm_model_name = DEFAULT_MODEL_NAME
-            provider_for_config = None
-
-        prompt = f"""You are an expert research advisor. Write a SHORT, on-point {type_label} recommendations report.
+       
 
 STRICT LENGTH: Maximum 500 words. Be extremely concise -- every sentence must reference a specific finding.
 
@@ -1998,7 +2022,7 @@ STRICT LENGTH: Maximum 500 words. Be extremely concise -- every sentence must re
             raise
 
     def _generate_fallback_paper(self, project, reports, figures, readme):
-        """Generate a simple paper from collected outputs without LLM."""
+        """ Generate a simple paper from collected outputs without LLM. """
         sections = [
             "## Abstract\n\nThis document compiles the complete analysis outputs.\n",
             f"## Research Question\n\n{project.query}\n",
