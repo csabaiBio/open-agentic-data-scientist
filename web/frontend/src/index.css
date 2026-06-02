@@ -3,9 +3,21 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    @apply bg-white;
+  }
+
+  html.dark {
+    @apply bg-slate-950;
+  }
+
   body {
-    @apply bg-gray-50 text-gray-900;
+    @apply bg-gray-50 text-gray-900 transition-colors duration-200;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  html.dark body {
+    @apply bg-slate-950 text-slate-100;
   }
 
   ::-webkit-scrollbar {
@@ -21,13 +33,30 @@
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-gray-400;
   }
+
+  html.dark ::-webkit-scrollbar-thumb {
+    @apply bg-slate-700;
+  }
+
+  html.dark ::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-600;
+  }
 }
 
 @layer components {
   .glass-card {
     @apply bg-white/80 backdrop-blur-sm border border-gray-200/60 rounded-2xl shadow-sm;
   }
+
+  html.dark .glass-card {
+    @apply bg-slate-900/75 border-slate-700/80 shadow-black/30;
+  }
+
   .glass-card-hover {
     @apply glass-card transition-all duration-200 hover:shadow-md hover:border-gray-300/80 hover:-translate-y-0.5;
+  }
+
+  html.dark .glass-card-hover {
+    @apply hover:border-slate-500/90 hover:shadow-black/40;
   }
 }

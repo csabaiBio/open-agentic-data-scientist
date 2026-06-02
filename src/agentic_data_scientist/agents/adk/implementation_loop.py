@@ -15,6 +15,7 @@ from agentic_data_scientist.agents.adk.event_compression import create_compressi
 from agentic_data_scientist.agents.adk.loop_detection import LoopDetectionAgent
 from agentic_data_scientist.agents.adk.review_confirmation import create_review_confirmation_agent
 from agentic_data_scientist.agents.adk.utils import (
+    REVIEW_MODEL_NAME,
     get_generate_content_config,
     get_review_model,
     resolve_provider_for_role,
@@ -113,10 +114,12 @@ def make_implementation_agents(working_dir: str, tools: list, model_config: dict
 
     # Use custom review model if model_config provided
     if model_config:
-        from agentic_data_scientist.agents.adk.utils import create_litellm_model_from_config
+        from agentic_data_scientist.agents.adk.utils import create_litellm_model_from_config, resolve_model_api_pair
         impl_review_model = create_litellm_model_from_config(model_config, role="review")
+        impl_review_model_name, _ = resolve_model_api_pair(model_config, role="review")
     else:
         impl_review_model = get_review_model()
+        impl_review_model_name = REVIEW_MODEL_NAME
 
     review_agent = LoopDetectionAgent(
         name="review_agent",
@@ -130,7 +133,7 @@ def make_implementation_agents(working_dir: str, tools: list, model_config: dict
                 thinking_budget=-1,
             ),
         ),
-        generate_content_config=get_generate_content_config(temperature=0.0, provider_override=review_provider_for_config),
+        generate_content_config=get_generate_content_config(temperature=0.0, provider_override=review_provider_for_config, model_name=impl_review_model_name),
         output_key="review_feedback",
         include_contents="none",
         after_agent_callback=review_compression_callback,
@@ -147,5 +150,6 @@ def make_implementation_agents(working_dir: str, tools: list, model_config: dict
             prompt_name="implementation_review_confirmation",
             model_override=impl_review_model,
             provider_override=review_provider_for_config,
+            model_name_override=impl_review_model_name,
         ),
     )

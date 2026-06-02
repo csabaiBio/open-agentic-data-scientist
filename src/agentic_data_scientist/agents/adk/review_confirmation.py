@@ -15,7 +15,7 @@ from google.genai import types
 from pydantic import BaseModel, Field
 
 from agentic_data_scientist.agents.adk.loop_detection import LoopDetectionAgent
-from agentic_data_scientist.agents.adk.utils import get_generate_content_config, get_review_model
+from agentic_data_scientist.agents.adk.utils import REVIEW_MODEL_NAME, get_generate_content_config, get_review_model
 from agentic_data_scientist.prompts import load_prompt
 
 
@@ -151,6 +151,7 @@ def create_review_confirmation_agent(
     prompt_name: str = "plan_review_confirmation",
     model_override: Optional[Any] = None,
     provider_override: Optional[str] = None,
+    model_name_override: Optional[str] = None,
 ) -> LoopDetectionAgent:
     """
     Create a review confirmation agent with structured output.
@@ -213,6 +214,7 @@ def create_review_confirmation_agent(
     after_callback = _create_exit_loop_callback(state_key) if auto_exit_on_completion else None
 
     review_confirmation_model = model_override or get_review_model()
+    effective_model_name = model_name_override or REVIEW_MODEL_NAME
 
     agent = LoopDetectionAgent(
         name=f"{prompt_name}_agent",
@@ -226,7 +228,7 @@ def create_review_confirmation_agent(
                 thinking_budget=-1,
             ),
         ),
-        generate_content_config=get_generate_content_config(temperature=0.0, provider_override=provider_override),
+        generate_content_config=get_generate_content_config(temperature=0.0, provider_override=provider_override, model_name=effective_model_name),
         output_schema=REVIEW_CONFIRMATION_OUTPUT_SCHEMA,  # Use output_schema for structured JSON
         output_key=state_key,  # Use unique state key per agent instance
         before_agent_callback=before_callback,  # Clear stale decisions before agent runs

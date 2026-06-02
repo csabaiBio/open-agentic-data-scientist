@@ -803,10 +803,17 @@ def exit_loop_simple(tool_context: ToolContext):
     return {}
 
 
+def _model_supports_temperature(model_name: str) -> bool:
+    """Return False for Anthropic models, which deprecated the temperature parameter."""
+    name_lower = (model_name or "").lower()
+    return "claude" not in name_lower
+
+
 def get_generate_content_config(
     temperature: float = 0.0,
     output_tokens: Optional[int] = None,
     provider_override: Optional[str] = None,
+    model_name: Optional[str] = None,
 ):
     """
     Create a GenerateContentConfig with retry settings.
@@ -825,8 +832,8 @@ def get_generate_content_config(
     """
     from google.genai import types
 
-    config_kwargs = {
-        "temperature": temperature,
+    effective_model = model_name or DEFAULT_MODEL_NAME
+    config_kwargs: dict = {
         "max_output_tokens": output_tokens,
         "http_options": types.HttpOptions(
             retry_options=types.HttpRetryOptions(
@@ -839,7 +846,10 @@ def get_generate_content_config(
             )
         ),
     }
-    provider = (provider_override or resolve_provider_from_model_name(DEFAULT_MODEL_NAME, fallback="openai")).lower()
+    if _model_supports_temperature(effective_model):
+        config_kwargs["temperature"] = temperature
+
+    provider = (provider_override or resolve_provider_from_model_name(effective_model, fallback="openai")).lower()
 
     # Local OpenAI-compatible servers (e.g., vLLM) often reject tool_choice="auto"
     # unless started with explicit flags. Disable automatic function-calling by

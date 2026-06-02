@@ -27,6 +27,8 @@ from agentic_data_scientist.agents.adk.implementation_loop import make_implement
 from agentic_data_scientist.agents.adk.loop_detection import LoopDetectionAgent
 from agentic_data_scientist.agents.adk.review_confirmation import create_review_confirmation_agent
 from agentic_data_scientist.agents.adk.utils import (
+    DEFAULT_MODEL_NAME,
+    REVIEW_MODEL_NAME,
     get_default_model,
     get_generate_content_config,
     get_review_model,
@@ -522,13 +524,17 @@ def create_agent(
 
     # Build custom models from model_config if provided
     if model_config:
-        from agentic_data_scientist.agents.adk.utils import create_litellm_model_from_config
+        from agentic_data_scientist.agents.adk.utils import create_litellm_model_from_config, resolve_model_api_pair
         planning_model = create_litellm_model_from_config(model_config, role="planning")
         review_model = create_litellm_model_from_config(model_config, role="review")
+        planning_model_name, _ = resolve_model_api_pair(model_config, role="planning")
+        review_model_name, _ = resolve_model_api_pair(model_config, role="review")
         logger.info("[AgenticDS] Using custom model/api_base pairs from project config")
     else:
         planning_model = get_default_model()
         review_model = get_review_model()
+        planning_model_name = DEFAULT_MODEL_NAME
+        review_model_name = REVIEW_MODEL_NAME
 
     # ------------------------- Implementation Loop -------------------------
 
@@ -563,7 +569,7 @@ def create_agent(
                 thinking_budget=-1,
             ),
         ),
-        generate_content_config=get_generate_content_config(temperature=0.3, provider_override=planning_provider_for_config),
+        generate_content_config=get_generate_content_config(temperature=0.3, provider_override=planning_provider_for_config, model_name=planning_model_name),
     )
 
     # ------------------------- High Level Planning Agents -------------------------
@@ -588,7 +594,7 @@ def create_agent(
                 thinking_budget=-1,
             ),
         ),
-        generate_content_config=get_generate_content_config(temperature=0.6, provider_override=planning_provider_for_config),
+        generate_content_config=get_generate_content_config(temperature=0.6, provider_override=planning_provider_for_config, model_name=planning_model_name),
         after_agent_callback=plan_maker_compression,
     )
 
@@ -612,7 +618,7 @@ def create_agent(
                 thinking_budget=-1,
             ),
         ),
-        generate_content_config=get_generate_content_config(temperature=0.3, provider_override=review_provider_for_config),
+        generate_content_config=get_generate_content_config(temperature=0.3, provider_override=review_provider_for_config, model_name=review_model_name),
         after_agent_callback=plan_reviewer_compression,
     )
 
@@ -627,6 +633,7 @@ def create_agent(
                 prompt_name="plan_review_confirmation",
                 model_override=review_model,
                 provider_override=review_provider_for_config,
+                model_name_override=review_model_name,
             ),
         ],
         max_iterations=10,
@@ -648,7 +655,7 @@ def create_agent(
         output_schema=PLAN_PARSER_OUTPUT_SCHEMA,
         output_key="parsed_plan_output",
         after_agent_callback=plan_parser_callback,
-        generate_content_config=get_generate_content_config(temperature=0.0, provider_override=planning_provider_for_config),
+        generate_content_config=get_generate_content_config(temperature=0.0, provider_override=planning_provider_for_config, model_name=planning_model_name),
     )
 
     # ------------------------- Success Criteria Checker -------------------------
@@ -676,7 +683,7 @@ def create_agent(
         output_schema=CRITERIA_CHECKER_OUTPUT_SCHEMA,
         output_key="criteria_checker_output",
         after_agent_callback=combined_criteria_callback,
-        generate_content_config=get_generate_content_config(temperature=0.0, provider_override=review_provider_for_config),
+        generate_content_config=get_generate_content_config(temperature=0.0, provider_override=review_provider_for_config, model_name=review_model_name),
     )
 
     # ------------------------- Stage Reflector -------------------------
@@ -704,7 +711,7 @@ def create_agent(
         output_schema=STAGE_REFLECTOR_OUTPUT_SCHEMA,
         output_key="stage_reflector_output",
         after_agent_callback=combined_reflector_callback,
-        generate_content_config=get_generate_content_config(temperature=0.4, provider_override=planning_provider_for_config),
+        generate_content_config=get_generate_content_config(temperature=0.4, provider_override=planning_provider_for_config, model_name=planning_model_name),
     )
 
     # ------------------------- Stage Orchestrator -------------------------
