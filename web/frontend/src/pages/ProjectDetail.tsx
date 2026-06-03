@@ -427,7 +427,6 @@ export default function ProjectDetail() {
     setAnswering(true)
     try {
       await answerQuestion(id, pendingQuestion.questionId, trimmed)
-      setPendingQuestion(null)
       setAnswerInput('')
     } catch (e) {
       console.error('Failed to answer question:', e)
