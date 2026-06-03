@@ -1671,7 +1671,7 @@ This is the core section. Present findings with integrated figure references.
             config_kwargs = {"max_output_tokens": 6000}
             if _model_supports_temperature(llm_model_name):
                 config_kwargs["temperature"] = 0.3
-            if (provider_for_config or "").lower() != "bedrock":
+            if (provider_for_config or "").lower() not in ("bedrock", "anthropic", "azure", "azure-openai", "azure-anthropic"):
                 config_kwargs["top_p"] = 0.95
 
             llm_request = LlmRequest(
@@ -1884,7 +1884,7 @@ STRICT LENGTH: Maximum 500 words. Be extremely concise -- every sentence must re
             from google.adk.models.llm_request import LlmRequest
             from google.genai import types as genai_types
             config_kwargs = {"temperature": 0.4, "max_output_tokens": 2000}
-            if (provider_for_config or "").lower() != "bedrock":
+            if (provider_for_config or "").lower() not in ("bedrock", "anthropic", "azure", "azure-openai", "azure-anthropic"):
                 config_kwargs["top_p"] = 0.95
 
             llm_request = LlmRequest(

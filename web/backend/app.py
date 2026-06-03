@@ -83,6 +83,13 @@ for lib_name in ["LiteLLM", "litellm", "httpx", "httpcore", "openai", "anthropic
     logging.getLogger(lib_name).setLevel(logging.WARNING)
 os.environ["LITELLM_LOG"] = "ERROR"
 
+try:
+    import litellm
+
+    litellm.drop_params = True
+except (ImportError, AttributeError):
+    pass
+
 from .llm_model_store import LlmModelStore
 from .models import (
     CostLimitUpdateRequest,

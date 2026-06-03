@@ -374,7 +374,7 @@ async def _llm_call(
         }
         resolved_provider = (provider_override or resolve_provider_from_model_name(model_name or DEFAULT_MODEL_NAME, fallback="openai")).lower()
         print("LLLM_PROVIDER:", resolved_provider)
-        if resolved_provider not in ("bedrock", "anthropic"):
+        if resolved_provider not in ("bedrock", "anthropic", "azure", "azure-openai", "azure-anthropic"):
             config_kwargs["top_p"] = 0.95
 
         llm_request = LlmRequest(

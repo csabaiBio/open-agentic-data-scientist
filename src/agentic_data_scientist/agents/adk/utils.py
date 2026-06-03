@@ -862,8 +862,8 @@ def get_generate_content_config(
             function_calling_config=types.FunctionCallingConfig(mode=types.FunctionCallingConfigMode.NONE),
         )
 
-    # Bedrock and Anthropic-routed providers can reject temperature+top_p together.
-    if provider not in ("bedrock", "anthropic", "azure-anthropic"):
+    # Bedrock, Anthropic, and Azure OpenAI routes can reject top_p.
+    if provider not in ("bedrock", "anthropic", "azure-anthropic", "azure", "azure-openai"):
         config_kwargs["top_p"] = 0.95
         config_kwargs["seed"] = 42
     return types.GenerateContentConfig(**config_kwargs)

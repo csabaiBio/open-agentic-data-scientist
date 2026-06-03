@@ -30,7 +30,7 @@ try:
     import litellm
 
     litellm.suppress_debug_info = False
-    litellm.drop_params = False
+    litellm.drop_params = True
     litellm.turn_off_message_logging = True
 except (ImportError, AttributeError):
     # LiteLLM not installed yet or attributes don't exist, will be configured later
@@ -244,7 +244,7 @@ def main(
             import litellm
 
             litellm.suppress_debug_info = False
-            litellm.drop_params = False
+            litellm.drop_params = True
             litellm.turn_off_message_logging = True
         except (ImportError, AttributeError):
             pass
