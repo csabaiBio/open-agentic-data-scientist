@@ -109,6 +109,7 @@ def get_claude_context(
     original_request: str = "",
     completed_stages: list = None,
     all_stages: list = None,
+    preferred_skills: list[str] = None,
 ) -> str:
     """
     Generate the initial user context/prompt for Claude with comprehensive context.
@@ -216,6 +217,18 @@ Execute the following stage implementation COMPLETELY and THOROUGHLY.
 
 IMPORTANT: You have scientific Skills available in .claude/skills/. 
 Start by asking "What Skills are available?" to discover specialized tools for your task.
+"""
+
+    if preferred_skills:
+        skills_lines = "\n".join([f"- {skill}" for skill in preferred_skills if str(skill).strip()])
+        if skills_lines:
+            context += (
+                "\nPREFERRED CLAUDE SKILLS (user-selected):\n"
+                "Prioritize these skills first when they apply to this task.\n"
+                f"{skills_lines}\n"
+            )
+
+    context += f"""
 
 Parse this stage into discrete steps and execute EVERY step. Work through multiple related subtasks in this session. Do not exit until this stage is fully implemented.
 
@@ -234,6 +247,7 @@ CRITICAL REQUIREMENTS:
 7. Print progress updates after each step
 8. Update README.md incrementally - DO NOT create separate summary files
 9. Document which Skills were used in README
+10. Prefer user-selected skills when relevant before using generic alternatives
 
 FILE HANDLING CONSTRAINTS (CRITICAL):
 - DO NOT read files >1MB directly - use head/tail or pandas with nrows parameter

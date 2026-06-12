@@ -362,6 +362,7 @@ class ProjectManager:
             planning_llm_model_id=req.planning_llm_model_id,
             review_llm_model_id=req.review_llm_model_id,
             coding_llm_model_id=req.coding_llm_model_id,
+            preferred_claude_skills=req.preferred_claude_skills,
             llm_config=req.llm_config,
             base_project_id=req.base_project_id,
         )
@@ -1146,7 +1147,10 @@ class ProjectManager:
         seen_skills = set(project.skills_used)  # resume tracking if restarted
 
         async for event_dict in await core.run_async(
-            analysis_query, files=uploaded_files, stream=True
+            analysis_query,
+            files=uploaded_files,
+            stream=True,
+            context={"preferred_claude_skills": project.preferred_claude_skills},
         ):
             if project.status == ProjectStatus.STOPPED:
                 break

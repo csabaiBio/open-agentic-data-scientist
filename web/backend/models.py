@@ -98,6 +98,7 @@ class ProjectCreate(BaseModel):
     planning_llm_model_id: Optional[int] = None
     review_llm_model_id: Optional[int] = None
     coding_llm_model_id: Optional[int] = None
+    preferred_claude_skills: List[str] = Field(default_factory=list)
 
 
 class Project(BaseModel):
@@ -127,6 +128,7 @@ class Project(BaseModel):
     planning_llm_model_id: Optional[int] = None
     review_llm_model_id: Optional[int] = None
     coding_llm_model_id: Optional[int] = None
+    preferred_claude_skills: List[str] = Field(default_factory=list)
     # Model configuration
     llm_config: Optional[ModelConfig] = None
     # Persisted generated content

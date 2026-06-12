@@ -8,7 +8,34 @@
   }
 
   html.dark {
-    @apply bg-slate-950;
+    background-color: #121212;
+
+    /* Palette variables */
+    --surface-a0: #121212;
+    --surface-a10: #252525;
+    --surface-a20: #393939;
+    --surface-a30: #4f4f4f;
+    --surface-a40: #666;
+    --surface-a50: #7d7d7d;
+
+    --tonal-a0: #161d25;
+    --tonal-a10: #293037;
+    --tonal-a20: #3d444b;
+    --tonal-a30: #53585f;
+    --tonal-a40: #696e74;
+    --tonal-a50: #80858a;
+
+    --primary-a0: #0590f2;
+    --primary-a10: #389cf4;
+    --primary-a20: #54a8f7;
+    --primary-a30: #6cb3f9;
+    --primary-a40: #82befa;
+    --primary-a50: #98c9fc;
+
+    --success-a0: #7dff95;
+    --warning-a0: #ffbc5e;
+    --danger-a0: #ff8080;
+    --info-a0: #87d1ff;
   }
 
   body {
@@ -17,7 +44,8 @@
   }
 
   html.dark body {
-    @apply bg-slate-950 text-slate-100;
+    background-color: #121212;
+    color: #f0f0f0;
   }
 
   ::-webkit-scrollbar {
@@ -35,11 +63,12 @@
   }
 
   html.dark ::-webkit-scrollbar-thumb {
-    @apply bg-slate-700;
+    background-color: #3d444b;
+    border-radius: 9999px;
   }
 
   html.dark ::-webkit-scrollbar-thumb:hover {
-    @apply bg-slate-600;
+    background-color: #53585f;
   }
 }
 
@@ -49,14 +78,38 @@
   }
 
   html.dark .glass-card {
-    @apply bg-slate-900/75 border-slate-700/80 shadow-black/30;
+    background-color: rgba(22, 29, 37, 0.85); /* tonal-a0 */
+    border-color: rgba(61, 68, 75, 0.7);      /* tonal-a20 */
+    box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  }
+
+  html.dark .glass-card-project {
+    background-color: rgba(41, 48, 55, 0.7);  /* tonal-a10 */
+    border-color: rgba(83, 88, 95, 0.5);      /* tonal-a30 */
+    box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  }
+
+  .glass-card-project-hover {
+    @apply glass-card transition-all duration-200 hover:shadow-md hover:border-gray-300/80 hover:-translate-y-0.5;
+  }
+
+  html.dark .glass-card-project-hover {
+    background-color: rgba(41, 48, 55, 0.7);  /* tonal-a10 */
+    border-color: rgba(83, 88, 95, 0.5);      /* tonal-a30 */
+    box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  }
+
+  html.dark .glass-card-project-hover:hover {
+    border-color: rgba(105, 110, 116, 0.8);   /* tonal-a40 */
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
   }
 
   .glass-card-hover {
     @apply glass-card transition-all duration-200 hover:shadow-md hover:border-gray-300/80 hover:-translate-y-0.5;
   }
 
-  html.dark .glass-card-hover {
-    @apply hover:border-slate-500/90 hover:shadow-black/40;
+  html.dark .glass-card-hover:hover {
+    border-color: rgba(83, 88, 95, 0.9);      /* tonal-a30 */
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
   }
 }

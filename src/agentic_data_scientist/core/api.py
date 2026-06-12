@@ -536,6 +536,7 @@ class DataScientist:
         )
 
         try:
+            self._last_context = context or {}
             # Set up agent if not already done
             await self._setup_agent()
 
@@ -552,6 +553,8 @@ class DataScientist:
             # For Claude Code agent, also set implementation_task
             if self.config.agent_type == "claude_code":
                 session.state["implementation_task"] = message
+            if context and isinstance(context.get("preferred_claude_skills"), list):
+                session.state["preferred_claude_skills"] = context.get("preferred_claude_skills", [])
 
             logger.info(f"[API] Set session state keys: {list(session.state.keys())}")
             logger.info(f"[API] implementation_task = {session.state.get('implementation_task', 'NOT SET')[:50]}...")
@@ -604,12 +607,16 @@ class DataScientist:
 
         try:
             # Pass initial state to runner via state_delta
-            initial_state = {
+            initial_state: Dict[str, Any] = {
                 "original_user_input": prompt,
                 "latest_user_input": prompt,
             }
             if self.config.agent_type == "claude_code":
                 initial_state["implementation_task"] = prompt
+            if isinstance(getattr(self, "_last_context", None), dict):
+                skills = self._last_context.get("preferred_claude_skills")
+                if isinstance(skills, list):
+                    initial_state["preferred_claude_skills"] = skills
 
             async for event in self.runner.run_async(
                 user_id="default_user",
@@ -799,12 +806,16 @@ class DataScientist:
 
         try:
             # Pass initial state to runner via state_delta
-            initial_state = {
+            initial_state: Dict[str, Any] = {
                 "original_user_input": prompt,
                 "latest_user_input": prompt,
             }
             if self.config.agent_type == "claude_code":
                 initial_state["implementation_task"] = prompt
+            if isinstance(getattr(self, "_last_context", None), dict):
+                skills = self._last_context.get("preferred_claude_skills")
+                if isinstance(skills, list):
+                    initial_state["preferred_claude_skills"] = skills
 
             async for event in self.runner.run_async(
                 user_id="default_user",

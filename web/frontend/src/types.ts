@@ -101,6 +101,7 @@ export interface Project {
   experimental_suggestions: string | null
   // Skills/tools used during the workflow
   skills_used: string[]
+  preferred_claude_skills: string[]
   total_cost_usd: number
   llm_calls: number
   total_prompt_tokens: number

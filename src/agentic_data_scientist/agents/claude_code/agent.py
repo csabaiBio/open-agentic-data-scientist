@@ -567,6 +567,7 @@ class ClaudeCodeAgent(Agent):
                     original_request=state.get("original_user_input", ""),
                     completed_stages=state.get("stage_implementations", []),
                     all_stages=state.get("high_level_stages", []),
+                    preferred_skills=state.get("preferred_claude_skills", []),
                 )
             else:
                 # Fallback: Try multiple state keys to find the task

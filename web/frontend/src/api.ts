@@ -36,6 +36,7 @@ export interface CreateProjectOpts {
   planningLlmModelId?: number
   reviewLlmModelId?: number
   codingLlmModelId?: number
+  preferredClaudeSkills?: string[]
   baseProjectId?: string
 }
 
@@ -52,6 +53,9 @@ export async function createProject(opts: CreateProjectOpts): Promise<Project> {
   if (opts.planningLlmModelId) form.append('planning_llm_model_id', String(opts.planningLlmModelId))
   if (opts.reviewLlmModelId) form.append('review_llm_model_id', String(opts.reviewLlmModelId))
   if (opts.codingLlmModelId) form.append('coding_llm_model_id', String(opts.codingLlmModelId))
+  if (opts.preferredClaudeSkills && opts.preferredClaudeSkills.length > 0) {
+    form.append('preferred_claude_skills', opts.preferredClaudeSkills.join(','))
+  }
   if (opts.baseProjectId) form.append('base_project_id', opts.baseProjectId)
   for (const f of opts.files) {
     form.append('files', f)
@@ -62,6 +66,13 @@ export async function createProject(opts: CreateProjectOpts): Promise<Project> {
     throw new Error(err || 'Failed to create project')
   }
   return res.json()
+}
+
+export async function fetchClaudeSkills(): Promise<string[]> {
+  const res = await fetch(`${BASE}/claude-skills`)
+  if (!res.ok) throw new Error('Failed to fetch Claude skills')
+  const data = await res.json() as { skills?: string[] }
+  return Array.isArray(data.skills) ? data.skills : []
 }
 
 export async function fetchLlmModels(): Promise<LlmModel[]> {

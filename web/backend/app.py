@@ -107,6 +107,23 @@ from .project_manager import PROJECTS_DIR, ProjectManager
 
 logger = logging.getLogger(__name__)
 
+
+def _discover_claude_skills() -> list[str]:
+    """Return available Claude skill names from known local directories."""
+    candidates = [
+        Path(os.getenv("CLAUDE_SKILLS_DIR", "/tmp/skills")),
+        Path.home() / ".claude" / "skills",
+        Path.cwd() / ".claude" / "skills",
+    ]
+    names: set[str] = set()
+    for base in candidates:
+        if not base.exists() or not base.is_dir():
+            continue
+        for child in base.iterdir():
+            if child.is_dir() and not child.name.startswith('.'):
+                names.add(child.name)
+    return sorted(names)
+
 app = FastAPI(title="Agentic Data Scientist", version="0.2.0")
 app.state.backend_warmup_task = None
 app.state.backend_warmup_completed = False
@@ -230,6 +247,11 @@ async def list_llm_models():
     return llm_model_store.list_models()
 
 
+@app.get("/api/claude-skills")
+async def list_claude_skills():
+    return {"skills": _discover_claude_skills()}
+
+
 @app.post("/api/llm-models")
 async def create_llm_model(req: LlmModelCreate):
     model_name = req.model_name.strip()
@@ -274,6 +296,7 @@ async def create_project(
     planning_llm_model_id: str = Form(""),
     review_llm_model_id: str = Form(""),
     coding_llm_model_id: str = Form(""),
+    preferred_claude_skills: str = Form(""),
     base_project_id: str = Form(""),
     files: list[UploadFile] = File(default=[]),
 ):
@@ -346,6 +369,7 @@ async def create_project(
         planning_llm_model_id=int(planning_llm_model_id) if planning_llm_model_id else None,
         review_llm_model_id=int(review_llm_model_id) if review_llm_model_id else None,
         coding_llm_model_id=int(coding_llm_model_id) if coding_llm_model_id else None,
+        preferred_claude_skills=[s for s in (preferred_claude_skills.split(',') if preferred_claude_skills else []) if s],
     )
     project = manager.create_project(req)
 
