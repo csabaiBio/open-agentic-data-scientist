@@ -33,15 +33,15 @@ export default function Layout() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-b from-gray-50 via-gray-50 to-gray-100 dark:from-slate-950 dark:via-slate-950 dark:to-slate-900 transition-colors duration-200">
+    <div className="min-h-screen flex flex-col bg-gradient-to-b from-gray-50 via-gray-50 to-gray-100 dark:from-[#121212] dark:via-[#121212] dark:to-[#161d25] transition-colors duration-200">
       {/* Top nav */}
-      <header className="sticky top-0 z-50 bg-white/70 dark:bg-slate-950/80 backdrop-blur-lg border-b border-gray-200/60 dark:border-slate-700/70 transition-colors duration-200">
+      <header className="sticky top-0 z-50 bg-white/70 dark:bg-[#121212]/80 backdrop-blur-lg border-b border-gray-200/60 dark:border-[#3d444b]/70 transition-colors duration-200">
         <div className="w-full px-6 h-14 flex items-center gap-4">
           <Link to="/" className="flex items-center gap-2.5 group">
             <div className="w-8 h-8 rounded-lg bg-brand-600 flex items-center justify-center shadow-sm">
               <FlaskConical className="w-4.5 h-4.5 text-white" />
             </div>
-            <span className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-slate-100">
+            <span className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">
               AI Data Scientist
             </span>
           </Link>
@@ -51,7 +51,7 @@ export default function Layout() {
           <button
             type="button"
             onClick={toggleTheme}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-slate-600 bg-white/90 dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-[#53585f] bg-white/90 dark:bg-[#293037] text-gray-700 dark:text-[#f0f0f0] hover:bg-gray-100 dark:hover:bg-[#3d444b] transition-colors"
             aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           >
@@ -64,8 +64,8 @@ export default function Layout() {
               to="/"
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 isHome
-                  ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300'
-                  : 'text-gray-500 dark:text-slate-300 hover:text-gray-900 dark:hover:text-slate-100 hover:bg-gray-100 dark:hover:bg-slate-800'
+                  ? 'bg-brand-50 dark:bg-[#0590f2]/20 text-brand-700 dark:text-[#54a8f7]'
+                  : 'text-gray-500 dark:text-[#80858a] hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-[#293037]'
               }`}
             >
               <LayoutDashboard className="w-4 h-4 inline-block mr-1.5 -mt-0.5" />

@@ -8,6 +8,7 @@ import {
   deleteLlmModel,
   deleteProject,
   fetchLlmModels,
+  fetchClaudeSkills,
 } from '../api'
 import type { LlmModel, LlmModelType, ProjectSummary, ProjectMode } from '../types'
 import StatusBadge from '../components/StatusBadge'
@@ -51,6 +52,7 @@ type DashboardConfigPayload = {
   planning_llm_model_id: number | null
   review_llm_model_id: number | null
   coding_llm_model_id: number | null
+  preferred_claude_skills: string[]
 }
 
 const DASHBOARD_CONFIG_STORAGE_KEY = 'agenticds.dashboard.config.v1'
@@ -141,6 +143,9 @@ export default function Dashboard() {
   const [maxCostUsd, setMaxCostUsd] = useState<number | ''>('')
   const [baseProjectId, setBaseProjectId] = useState<string>('')
   const [selectedProjectId, setSelectedProjectId] = useState<string>('')
+  const [availableClaudeSkills, setAvailableClaudeSkills] = useState<string[]>([])
+  const [selectedClaudeSkills, setSelectedClaudeSkills] = useState<string[]>([])
+  const [showClaudeSkillsSettings, setShowClaudeSkillsSettings] = useState(false)
   const [nowMs, setNowMs] = useState(Date.now())
   const yearsBack = Math.max(1, Math.round(daysBack / 365))
 
@@ -169,6 +174,17 @@ export default function Dashboard() {
 
   useEffect(() => { load() }, [load])
   useEffect(() => { loadLlmModelRegistry() }, [loadLlmModelRegistry])
+  useEffect(() => {
+    const loadClaudeSkills = async () => {
+      try {
+        const skills = await fetchClaudeSkills()
+        setAvailableClaudeSkills(skills)
+      } catch (e) {
+        console.error('Failed to load Claude skills:', e)
+      }
+    }
+    loadClaudeSkills()
+  }, [])
 
   useEffect(() => {
     const hasRunning = projects.some(p => p.status === 'running' || p.status === 'pending')
@@ -260,9 +276,10 @@ export default function Dashboard() {
     planning_llm_model_id: typeof planningLlmModelId === 'number' ? planningLlmModelId : null,
     review_llm_model_id: typeof reviewLlmModelId === 'number' ? reviewLlmModelId : null,
     coding_llm_model_id: typeof codingLlmModelId === 'number' ? codingLlmModelId : null,
+    preferred_claude_skills: selectedClaudeSkills,
   }), [
     query, mode, humanInTheLoop, numPapers, daysBack, maxCostUsd, baseProjectId,
-    planningLlmModelId, reviewLlmModelId, codingLlmModelId,
+    planningLlmModelId, reviewLlmModelId, codingLlmModelId, selectedClaudeSkills,
   ])
 
   const applyDashboardConfig = useCallback((config: Partial<DashboardConfigPayload>) => {
@@ -284,6 +301,9 @@ export default function Dashboard() {
     if (typeof config.planning_llm_model_id === 'number' && Number.isFinite(config.planning_llm_model_id)) setPlanningLlmModelId(config.planning_llm_model_id)
     if (typeof config.review_llm_model_id === 'number' && Number.isFinite(config.review_llm_model_id)) setReviewLlmModelId(config.review_llm_model_id)
     if (typeof config.coding_llm_model_id === 'number' && Number.isFinite(config.coding_llm_model_id)) setCodingLlmModelId(config.coding_llm_model_id)
+    if (Array.isArray(config.preferred_claude_skills)) {
+      setSelectedClaudeSkills(config.preferred_claude_skills.filter((s): s is string => typeof s === 'string' && s.trim().length > 0))
+    }
   }, [])
 
   useEffect(() => {
@@ -374,6 +394,7 @@ export default function Dashboard() {
         planningLlmModelId: typeof planningLlmModelId === 'number' ? planningLlmModelId : undefined,
         reviewLlmModelId: typeof reviewLlmModelId === 'number' ? reviewLlmModelId : undefined,
         codingLlmModelId: typeof codingLlmModelId === 'number' ? codingLlmModelId : undefined,
+        preferredClaudeSkills: selectedClaudeSkills,
         maxCostUsd: typeof maxCostUsd === 'number' && maxCostUsd > 0 ? maxCostUsd : undefined,
         baseProjectId: baseProjectId || undefined,
       })
@@ -462,7 +483,7 @@ export default function Dashboard() {
               projects.map((p) => {
                 const isSelected = p.id === selectedProjectId
                 return (
-                  <div key={p.id} onClick={() => { setSelectedProjectId(p.id); setShowNew(false) }} className={`glass-card-hover px-3 py-2.5 cursor-pointer border ${isSelected ? 'border-brand-300 bg-brand-50/50' : 'border-transparent'}`}>
+                  <div key={p.id} onClick={() => { setSelectedProjectId(p.id); setShowNew(false) }} className={`glass-card-project-hover px-3 py-2.5 cursor-pointer border ${isSelected ? 'border-brand-300 bg-brand-50/50' : 'border-transparent'}`}>
                     <div className="flex items-start gap-4">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1"><StatusBadge status={p.status} /><span className="text-xs text-gray-400 capitalize px-2 py-0.5 bg-gray-100 rounded-md">{p.mode}</span></div>
@@ -540,6 +561,29 @@ export default function Dashboard() {
                   </label>
                 </div>
 
+                <div className="rounded-xl border border-gray-200 bg-gray-100/80 p-3.5 space-y-2">
+                  <div>
+                    <span className="inline-flex items-center rounded-full bg-fuchsia-100 text-fuchsia-700 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide">Reuse Previous Project Output</span>
+                    <span className="text-gray-400 text-xs ml-2">(optional)</span>
+                  </div>
+                  <label className="block text-xs font-medium text-gray-500">Earlier project</label>
+                  <select
+                    value={baseProjectId}
+                    onChange={(e) => setBaseProjectId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"
+                  >
+                    <option value="">Do not reuse outputs</option>
+                    {projects.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.query} ({project.status})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-gray-500 leading-relaxed">
+                    Selecting a project copies its generated output files into the new project before the run starts.
+                  </p>
+                </div>
+
                 {mode === 'discovery' && (
                   <div className="p-4 rounded-xl bg-violet-50/60 border border-violet-100 space-y-4">
                     <div className="flex items-center gap-2 text-sm font-medium text-violet-700"><Compass className="w-4 h-4" />Discovery Settings</div>
@@ -581,6 +625,55 @@ export default function Dashboard() {
                     {mode !== 'simple' && <div><label className="block text-xs font-medium text-gray-500 mb-1">Review Model</label><select value={reviewLlmModelId} onChange={(e) => applySelectedModelToRole('review', e.target.value ? Number(e.target.value) : '')} className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"><option value="">Select review model</option>{llmModels.map(model => (<option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>))}</select></div>}
                     {mode !== 'discovery' && <div><label className="block text-xs font-medium text-gray-500 mb-1">Coding Model</label><select value={codingLlmModelId} onChange={(e) => applySelectedModelToRole('coding', e.target.value ? Number(e.target.value) : '')} className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm bg-white"><option value="">Select coding model</option>{llmModels.map(model => (<option key={model.id} value={model.id}>{model.type} | {model.model_name}</option>))}</select><p className="text-[10px] text-gray-400 mt-1">If no saved coding model is selected, default is <span className="font-medium text-gray-500">claude-sonnet-4-5</span>.</p></div>}
                   </div>
+                </div>
+
+                <div className="rounded-xl border border-gray-200 bg-gray-100/80 p-3.5 space-y-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowClaudeSkillsSettings(prev => !prev)}
+                    className="w-full flex items-center justify-between gap-2"
+                  >
+                    <div>
+                      <span className="inline-flex items-center rounded-full bg-cyan-100 text-cyan-700 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide">Preferred Claude Skills</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700">{selectedClaudeSkills.length} selected</span>
+                      {showClaudeSkillsSettings ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
+                    </div>
+                  </button>
+
+                  {showClaudeSkillsSettings && (
+                    <div className="space-y-2">
+                      <div className="text-[11px] text-gray-500">Pick Claude skills to prioritize in the coding model instruction prompt.</div>
+                      {availableClaudeSkills.length === 0 ? (
+                        <div className="text-xs text-gray-400">No Claude skills found on this machine.</div>
+                      ) : (
+                        <div className="max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white p-3">
+                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                            {availableClaudeSkills.map((skill) => {
+                              const checked = selectedClaudeSkills.includes(skill)
+                              return (
+                                <label key={skill} className="flex items-center gap-2 rounded-md border border-gray-100 px-2 py-2 cursor-pointer hover:bg-gray-50 transition-colors">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(e) => {
+                                      setSelectedClaudeSkills((prev) => {
+                                        if (e.target.checked) return prev.includes(skill) ? prev : [...prev, skill]
+                                        return prev.filter((s) => s !== skill)
+                                      })
+                                    }}
+                                    className="h-3.5 w-3.5 rounded border-gray-300 text-cyan-600 focus:ring-cyan-400 flex-shrink-0"
+                                  />
+                                  <span className="text-xs text-gray-700 leading-tight break-words">{skill}</span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="rounded-xl border border-gray-200 bg-gray-100/80 p-3.5 space-y-3">
